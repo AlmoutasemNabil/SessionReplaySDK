@@ -387,6 +387,18 @@ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
 
 ---
 
-<p align="center">
-  Made with ❤️ for the iOS community
-</p>
+## 📄 License
+
+This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) file for details.
+
+---
+
+<div align="center">
+
+**Made with ❤️ by [AlmoutasemNabil](https://github.com/AlmoutasemNabil)**
+
+© 2026 AlmoutasemNabil. All rights reserved.
+
+⭐ **Star this repo if you find it helpful!**
+
+</div>
