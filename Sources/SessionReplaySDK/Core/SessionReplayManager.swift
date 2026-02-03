@@ -309,9 +309,21 @@ public final class SessionReplayManager {
         }
         viewTreeHash = newHash
 
+        // Collect sensitive view frames before capturing
+        var sensitiveFrames: [CGRect] = []
+        if config.maskSensitiveViews {
+            sensitiveFrames = collectSensitiveViewFrames(in: window)
+        }
+
         let renderer = UIGraphicsImageRenderer(bounds: window.bounds)
         let image = renderer.image { context in
             window.drawHierarchy(in: window.bounds, afterScreenUpdates: false)
+
+            // Draw masks over sensitive views
+            if config.maskSensitiveViews && !sensitiveFrames.isEmpty {
+                drawSensitiveMasks(in: context.cgContext, frames: sensitiveFrames)
+            }
+
             if config.showTouchIndicators {
                 drawTouchIndicators(in: context.cgContext, bounds: window.bounds)
             }
@@ -322,6 +334,82 @@ public final class SessionReplayManager {
         }
         captureQueue.async { [weak self] in
             self?.processFrame(image)
+        }
+    }
+
+    /// Collect frames of all sensitive views that should be masked
+    private func collectSensitiveViewFrames(in view: UIView) -> [CGRect] {
+        var frames: [CGRect] = []
+        collectSensitiveFramesRecursive(view, rootView: view, frames: &frames)
+        return frames
+    }
+
+    private func collectSensitiveFramesRecursive(_ view: UIView, rootView: UIView, frames: inout [CGRect]) {
+        // Check if this view should be masked
+        if shouldMaskView(view) {
+            let frameInRoot = view.convert(view.bounds, to: rootView)
+            frames.append(frameInRoot)
+            return // Don't check children of masked views
+        }
+
+        // Recurse into subviews
+        for subview in view.subviews {
+            collectSensitiveFramesRecursive(subview, rootView: rootView, frames: &frames)
+        }
+    }
+
+    private func shouldMaskView(_ view: UIView) -> Bool {
+        // Check manual sensitive marking
+        if view.isSensitive {
+            return true
+        }
+
+        // Check if it's a MaskedView
+        if let maskable = view as? SessionReplayMaskable, maskable.shouldMaskInReplay {
+            return true
+        }
+
+        // Auto-mask secure text fields (password fields)
+        if config.autoMaskSecureTextFields {
+            if let textField = view as? UITextField, textField.isSecureTextEntry {
+                return true
+            }
+        }
+
+        // Auto-mask regular text fields
+        if config.autoMaskTextFields {
+            if view is UITextField || view is UITextView {
+                return true
+            }
+        }
+
+        // Check custom view classes
+        let viewClassName = String(describing: type(of: view))
+        if config.autoMaskViewClasses.contains(viewClassName) {
+            return true
+        }
+
+        return false
+    }
+
+    private func drawSensitiveMasks(in context: CGContext, frames: [CGRect]) {
+        context.setFillColor(config.sensitiveViewMaskColor.cgColor)
+
+        for frame in frames {
+            context.fill(frame)
+
+            // Draw a small "masked" indicator
+            let iconSize: CGFloat = min(frame.width, frame.height, 24)
+            if iconSize >= 16 {
+                context.setFillColor(UIColor.white.withAlphaComponent(0.5).cgColor)
+                let iconRect = CGRect(
+                    x: frame.midX - iconSize / 2,
+                    y: frame.midY - iconSize / 2,
+                    width: iconSize,
+                    height: iconSize
+                )
+                context.fillEllipse(in: iconRect)
+            }
         }
     }
 

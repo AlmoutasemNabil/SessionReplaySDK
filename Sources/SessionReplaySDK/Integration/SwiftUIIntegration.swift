@@ -390,6 +390,62 @@ public extension View {
             TouchIndicatorOverlay()
         }
     }
+
+    /// Mark this view as containing sensitive data that should be masked in replay
+    /// The view will be replaced with a gray box in the recorded video
+    func sensitiveContent() -> some View {
+        modifier(SensitiveContentModifier())
+    }
+
+    /// Mark this view as containing sensitive data with custom mask color
+    func sensitiveContent(maskColor: Color) -> some View {
+        modifier(SensitiveContentModifier(maskColor: maskColor))
+    }
+}
+
+// MARK: - Sensitive Content Modifier
+
+/// View modifier that marks a view as containing sensitive data
+public struct SensitiveContentModifier: ViewModifier {
+    var maskColor: Color = Color.gray
+
+    public init(maskColor: Color = .gray) {
+        self.maskColor = maskColor
+    }
+
+    public func body(content: Content) -> some View {
+        content
+            .background(
+                SensitiveMarkerView()
+            )
+    }
+}
+
+/// UIViewRepresentable that marks the hosting view as sensitive
+struct SensitiveMarkerView: UIViewRepresentable {
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.backgroundColor = .clear
+        view.isUserInteractionEnabled = false
+        // Mark as sensitive using the accessibility identifier approach
+        view.accessibilityIdentifier = "sr-no-capture"
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        // Ensure the parent view hierarchy is also marked
+        DispatchQueue.main.async {
+            // Walk up the view hierarchy and mark the first significant view
+            var current: UIView? = uiView.superview
+            while let view = current {
+                if view.bounds.size != .zero {
+                    view.markAsSensitive()
+                    break
+                }
+                current = view.superview
+            }
+        }
+    }
 }
 
 // MARK: - Recording Control View

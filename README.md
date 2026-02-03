@@ -154,6 +154,11 @@ SessionReplaySDK.uploadAllSessions { results in
 | `videoBitrate` | `75,000` | H.264 bitrate in bps |
 | `captureTouches` | `true` | Record touch events |
 | `showTouchIndicators` | `true` | Draw touch dots on video |
+| `maskSensitiveViews` | `true` | Mask marked sensitive views |
+| `sensitiveViewMaskColor` | `.gray` | Color for masked areas |
+| `autoMaskTextFields` | `true` | Auto-mask text inputs |
+| `autoMaskSecureTextFields` | `true` | Auto-mask password fields |
+| `autoMaskViewClasses` | `[]` | Custom classes to auto-mask |
 | `maxStorageSize` | `50MB` | Max local storage |
 | `maxSessionDuration` | `300s` | Auto-stop after duration |
 
@@ -276,12 +281,53 @@ The SDK sends multipart form data:
 
 ## Privacy & Security
 
-- **Header Redaction**: Authorization, Cookie, API keys auto-redacted
-- **URL Exclusion**: Regex patterns to exclude endpoints
+### Sensitive Data Masking
+
+The SDK automatically masks sensitive content in screen recordings:
+
+**Automatic Masking (enabled by default):**
+- Secure text fields (password inputs)
+- Regular text fields and text views
+- Views marked with `markAsSensitive()` or `.sensitiveContent()`
+
+**Configuration Options:**
+```swift
+var config = SessionReplayConfig()
+config.maskSensitiveViews = true          // Enable/disable masking
+config.sensitiveViewMaskColor = .gray     // Mask color
+config.autoMaskTextFields = true          // Auto-mask UITextField/UITextView
+config.autoMaskSecureTextFields = true    // Auto-mask password fields
+config.autoMaskViewClasses = ["CreditCardView"]  // Custom classes to mask
+```
+
+**Manual Masking - UIKit:**
+```swift
+// Mark any UIView as sensitive
+passwordField.markAsSensitive()
+creditCardView.markAsSensitive()
+
+// Check if view is marked
+if myView.isSensitive { ... }
+```
+
+**Manual Masking - SwiftUI:**
+```swift
+// Mark any SwiftUI view as sensitive
+SecretDataView()
+    .sensitiveContent()
+
+// With custom mask color
+PaymentForm()
+    .sensitiveContent(maskColor: .black)
+```
+
+### Additional Privacy Features
+
+- **Header Redaction**: Authorization, Cookie, API keys auto-redacted from network logs
+- **URL Exclusion**: Regex patterns to exclude specific endpoints
 - **Log Sanitization**: Custom closure for PII removal
-- **Sensitive Views**: Mark fields to exclude from capture
-- **Local-First**: Data stored locally, upload is opt-in
-- **No Dependencies**: Pure Swift, no third-party code
+- **Local-First**: All data stored locally, upload is opt-in
+- **No Dependencies**: Pure Swift, no third-party tracking code
 
 ## Architecture
 

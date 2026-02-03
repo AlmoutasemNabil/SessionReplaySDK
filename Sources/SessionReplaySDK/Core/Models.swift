@@ -44,6 +44,21 @@ public struct SessionReplayConfig {
     /// Whether to show touch indicators on captured frames
     public var showTouchIndicators: Bool = true
 
+    /// Whether to mask sensitive views (marked with `markAsSensitive()`)
+    public var maskSensitiveViews: Bool = true
+
+    /// Color used to mask sensitive content
+    public var sensitiveViewMaskColor: UIColor = .gray
+
+    /// Whether to automatically mask text input fields
+    public var autoMaskTextFields: Bool = true
+
+    /// Whether to automatically mask secure text entries (password fields)
+    public var autoMaskSecureTextFields: Bool = true
+
+    /// View classes to automatically mask (in addition to manually marked views)
+    public var autoMaskViewClasses: [String] = []
+
     /// Directory for storing session recordings
     public var storageDirectory: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
