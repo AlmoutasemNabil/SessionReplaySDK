@@ -22,7 +22,7 @@ import Foundation
 public enum SessionReplaySDK {
 
     /// SDK version
-    public static let version = "1.0.0"
+    public static let version = "0.0.1"
 
     // MARK: - Configuration
 

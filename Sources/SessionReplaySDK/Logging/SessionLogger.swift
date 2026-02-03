@@ -5,6 +5,12 @@
 //  Console log and network request capture for session replay.
 //  Designed to integrate with SessionReplayManager lifecycle.
 //
+//  Created by AlmoutasemNabil on 2026.
+//  Copyright © 2026 AlmoutasemNabil. All rights reserved.
+//
+//  This source code is licensed under the MIT license found in the
+//  LICENSE file in the root directory of this source tree.
+//
 
 import Foundation
 

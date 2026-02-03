@@ -1,0 +1,96 @@
+# Xcode
+*.xcodeproj/**/xcuserdata/
+*.xcworkspace/**/xcuserdata/
+*.xcworkspace/**/contents.xcworkspacedata
+*.xccheckout
+*.moved-aside
+*.xcuserstate
+*.xcscmblueprint
+*.xcscheme
+
+# Build
+build/
+DerivedData/
+*.build/
+*.o
+*.LinkFileList
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+*.app
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+Packages/
+
+# CocoaPods (if ever added)
+Pods/
+*.xcworkspace
+
+# Carthage (if ever added)
+Carthage/Build/
+Carthage/Checkouts/
+
+# Fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# VS Code
+.vscode/
+
+# AppCode
+.idea/
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*~
+
+# Test artifacts
+*.xcresult
+TestResults/
+
+# Code coverage
+codecov.yml
+coverage/
+*.gcov
+*.gcda
+*.gcno
+lcov.info
+
+# Documentation
+docs/_build/
+.jazzy/
+
+# Session recordings (demo app data)
+SessionRecordings/
+*.mp4
+*.json
+
+# Archives
+*.xcarchive
+
+# Playgrounds
+timeline.xctimeline
+playground.xcworkspace
+
+# Environment
+.env
+.env.local
+*.pem
+*.p12
+*.mobileprovision
