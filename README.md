@@ -354,42 +354,6 @@ SessionReplaySDK/
 └── SessionReplaySDK.swift        # Public facade
 ```
 
-## Roadmap
-
-### v1.1 - Stability
-- [ ] Fix video/session duration mismatch
-- [ ] Improve touch indicator accuracy
-- [ ] Add session thumbnail generation
-- [ ] Background upload support
-
-### v1.2 - Features
-- [ ] Automatic crash detection
-- [ ] Session compression (gzip)
-- [ ] Chunked upload for large files
-- [ ] Offline queue management
-
-### v1.3 - Platform Expansion
-- [ ] macOS support
-- [ ] tvOS support
-- [ ] visionOS exploration
-- [ ] Catalyst optimization
-
-### Future Ideas
-- [ ] Real-time streaming mode
-- [ ] Web dashboard viewer
-- [ ] Heat map generation
-- [ ] Gesture recognition labels
-- [ ] A/B test integration
-- [ ] Analytics platform plugins
-
-## Known Issues
-
-| Issue | Status | Workaround |
-|-------|--------|------------|
-| Video duration differs from session | Investigating | Use time mapping in playback |
-| Touch indicators on system UI | Won't fix | System limitation |
-| Third-party network libs | Manual | Use URLProtocol registration |
-
 ## Contributing
 
 We welcome contributions!
