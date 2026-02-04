@@ -114,6 +114,18 @@ public final class SessionLogger {
         logQueue.sync { isCapturing }
     }
 
+    // MARK: - Public Access to Logs
+
+    /// Get current logs (for live display during recording)
+    public func getLogs() -> [LogEntry] {
+        logQueue.sync { logEntries }
+    }
+
+    /// Get current network requests (for live display during recording)
+    public func getNetworkRequests() -> [NetworkEntry] {
+        logQueue.sync { networkEntries }
+    }
+
     // MARK: - Manual Logging API
 
     /// Log a custom message
