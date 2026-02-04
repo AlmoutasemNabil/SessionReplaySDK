@@ -11,8 +11,14 @@
   <strong>A powerful, privacy-focused session replay SDK for iOS applications.</strong>
 </p>
 
+
+
 <p align="center">
   Capture user sessions with video recording, touch visualization, console logs, and network requests—all synchronized for powerful debugging and UX analysis.
+</p>
+
+<p align="center">
+  <strong>A complete demo application <a href="https://github.com/AlmoutasemNabil/SessionReplayDemo">SessionReplayDemo</a> </strong>
 </p>
 
 ---
