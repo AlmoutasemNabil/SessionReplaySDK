@@ -59,11 +59,19 @@ public struct SessionReplayConfig {
     /// View classes to automatically mask (in addition to manually marked views)
     public var autoMaskViewClasses: [String] = []
 
-    /// Directory for storing session recordings
-    public var storageDirectory: URL {
-        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("SessionReplays", isDirectory: true)
-    }
+    /// Directory for storing session recordings.
+    /// Can be customized to support App Groups for sharing data between app and extensions.
+    ///
+    /// Example usage with App Groups:
+    /// ```swift
+    /// var config = SessionReplayConfig()
+    /// if let containerURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.com.yourapp") {
+    ///     config.storageDirectory = containerURL.appendingPathComponent("SessionReplays", isDirectory: true)
+    /// }
+    /// SessionReplaySDK.configure(videoConfig: config)
+    /// ```
+    public var storageDirectory: URL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("SessionReplays", isDirectory: true)
 
     public init() {}
 }

@@ -252,8 +252,24 @@ public final class SessionReplayManager {
 
     private func ensureStorageDirectory() {
         let fileManager = FileManager.default
-        if !fileManager.fileExists(atPath: config.storageDirectory.path) {
-            try? fileManager.createDirectory(at: config.storageDirectory, withIntermediateDirectories: true)
+        let directoryPath = config.storageDirectory.path
+
+        if !fileManager.fileExists(atPath: directoryPath) {
+            do {
+                try fileManager.createDirectory(
+                    at: config.storageDirectory,
+                    withIntermediateDirectories: true,
+                    attributes: nil
+                )
+                print("[SessionReplay] Created storage directory: \(directoryPath)")
+            } catch {
+                print("[SessionReplay] Failed to create storage directory: \(error.localizedDescription)")
+            }
+        }
+
+        // Verify the directory is writable
+        if !fileManager.isWritableFile(atPath: directoryPath) {
+            print("[SessionReplay] Warning: Storage directory is not writable: \(directoryPath)")
         }
     }
 

@@ -43,6 +43,39 @@ public enum SessionReplaySDK {
     ) {
         SessionReplayManager.shared.configure(videoConfig, logConfig: logConfig)
     }
+
+    /// Configure the SDK with App Group support for sharing data between app and extensions
+    /// - Parameters:
+    ///   - appGroupIdentifier: The App Group identifier (e.g., "group.com.yourapp")
+    ///   - videoConfig: Video capture configuration (optional, will use App Group storage)
+    ///   - logConfig: Logging configuration (optional)
+    /// - Returns: True if App Group was successfully configured, false if container URL not available
+    @discardableResult
+    public static func configureWithAppGroup(
+        _ appGroupIdentifier: String,
+        videoConfig: SessionReplayConfig = SessionReplayConfig(),
+        logConfig: SessionLoggerConfig = SessionLoggerConfig()
+    ) -> Bool {
+        var config = videoConfig
+
+        guard let containerURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier) else {
+            print("[SessionReplay] Failed to get App Group container URL for: \(appGroupIdentifier)")
+            // Fall back to default configuration
+            configure(videoConfig: config, logConfig: logConfig)
+            return false
+        }
+
+        config.storageDirectory = containerURL.appendingPathComponent("SessionReplays", isDirectory: true)
+        print("[SessionReplay] Configured with App Group storage: \(config.storageDirectory.path)")
+
+        configure(videoConfig: config, logConfig: logConfig)
+        return true
+    }
+
+    /// Get the current storage directory
+    public static var storageDirectory: URL {
+        SessionReplayManager.shared.config.storageDirectory
+    }
     #endif
 
     /// Configure the upload service
