@@ -35,6 +35,11 @@ public final class SessionReplayManager {
     /// Delegate for upload events
     public weak var uploadDelegate: SessionUploadDelegate?
 
+    // MARK: - User Identification
+
+    /// Custom user info dictionary for identifying users in session data
+    public private(set) var userInfo: [String: String] = [:]
+
     // MARK: - Private Properties
 
     private var displayLink: CADisplayLink?
@@ -49,6 +54,9 @@ public final class SessionReplayManager {
 
     private var cancellables = Set<AnyCancellable>()
     private var viewTreeHash: Int = 0
+
+    /// Timer for crash recovery saves
+    private var crashRecoveryTimer: Timer?
 
     // MARK: - Initialization
 
@@ -71,6 +79,45 @@ public final class SessionReplayManager {
         self.logConfig = logConfig
         ensureStorageDirectory()
         SessionLogger.shared.configure(logConfig)
+
+        // Auto-start if configured
+        if config.autoStartOnLaunch {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                self?.startSession()
+            }
+        }
+    }
+
+    // MARK: - User Identification
+
+    /// Set custom user info for session identification
+    /// - Parameter info: Dictionary of user info (e.g., ["userId": "123", "email": "user@example.com"])
+    public func setUserInfo(_ info: [String: String]) {
+        self.userInfo = info
+        if config.debugLogging {
+            print("[SessionReplay] User info set: \(info.keys.joined(separator: ", "))")
+        }
+    }
+
+    /// Update a single user info value
+    public func setUserInfo(key: String, value: String) {
+        self.userInfo[key] = value
+    }
+
+    /// Clear all user info
+    public func clearUserInfo() {
+        self.userInfo.removeAll()
+    }
+
+    /// Identify user with common fields
+    public func identifyUser(userId: String, email: String? = nil, name: String? = nil, additionalInfo: [String: String]? = nil) {
+        var info: [String: String] = ["userId": userId]
+        if let email = email { info["email"] = email }
+        if let name = name { info["name"] = name }
+        if let additional = additionalInfo {
+            info.merge(additional) { _, new in new }
+        }
+        setUserInfo(info)
     }
 
     // MARK: - Session Lifecycle
@@ -117,6 +164,11 @@ public final class SessionReplayManager {
 
         startDisplayLink()
 
+        // Start crash recovery timer if enabled
+        if config.enableCrashRecovery {
+            startCrashRecoveryTimer()
+        }
+
         print("[SessionReplay] Session started: \(currentSession?.sessionId ?? "unknown")")
     }
 
@@ -124,10 +176,13 @@ public final class SessionReplayManager {
     public func stopSession() {
         guard isRecording else { return }
 
-        print("[SessionReplay] Stopping session...")
+        if config.debugLogging {
+            print("[SessionReplay] Stopping session...")
+        }
 
         isRecording = false
         stopDisplayLink()
+        stopCrashRecoveryTimer()
 
         // Stop logging
         let logData = SessionLogger.shared.stopCapture()
@@ -139,10 +194,43 @@ public final class SessionReplayManager {
 
             if let session = self.currentSession {
                 self.saveSessionMetadata(session, logData: logData)
+                self.cleanupCrashRecoveryFile(sessionId: session.sessionId)
             }
 
-            print("[SessionReplay] Session stopped. Frames captured: \(self.currentSession?.frameCount ?? 0)")
-            print("[SessionReplay] Touch events: \(self.currentSession?.touchEvents?.count ?? 0)")
+            if self.config.debugLogging {
+                print("[SessionReplay] Session stopped. Frames captured: \(self.currentSession?.frameCount ?? 0)")
+                print("[SessionReplay] Touch events: \(self.currentSession?.touchEvents?.count ?? 0)")
+            }
+        }
+    }
+
+    /// Emergency stop - saves session immediately (for crash/terminate scenarios)
+    private func emergencyStopSession() {
+        guard isRecording else { return }
+
+        if config.debugLogging {
+            print("[SessionReplay] Emergency stop - saving session...")
+        }
+
+        isRecording = false
+        stopDisplayLink()
+        stopCrashRecoveryTimer()
+
+        // Get current log data
+        let logData = SessionLogger.shared.stopCapture()
+
+        // Finish video writing synchronously if possible
+        videoWriter?.finishWritingSync()
+
+        currentSession?.endTime = Date()
+
+        if let session = currentSession {
+            saveSessionMetadata(session, logData: logData)
+            cleanupCrashRecoveryFile(sessionId: session.sessionId)
+        }
+
+        if config.debugLogging {
+            print("[SessionReplay] Emergency save completed")
         }
     }
 
@@ -167,10 +255,7 @@ public final class SessionReplayManager {
         )
 
         currentSession?.touchEvents?.append(event)
-
-        if touch.phase == .began || touch.phase == .ended {
-            print("[SessionReplay] Touch \(event.phaseDescription) at \(location)")
-        }
+        // Touch logging removed - was too verbose for console
     }
 
     // MARK: - Screen Tracking
@@ -274,23 +359,67 @@ public final class SessionReplayManager {
     }
 
     private func setupNotifications() {
+        // App entering foreground - optionally auto-start
         NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)
             .sink { [weak self] _ in
-                // Optionally auto-start
+                guard let self = self else { return }
+                if self.config.autoStartOnLaunch && !self.isRecording {
+                    self.startSession()
+                }
             }
             .store(in: &cancellables)
 
+        // App entering background - optionally auto-stop
         NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)
             .sink { [weak self] _ in
-                self?.stopSession()
+                guard let self = self else { return }
+                if self.config.autoStopOnBackground && self.isRecording {
+                    self.stopSession()
+                }
             }
             .store(in: &cancellables)
 
+        // App terminating - always try to save
         NotificationCenter.default.publisher(for: UIApplication.willTerminateNotification)
             .sink { [weak self] _ in
-                self?.stopSession()
+                guard let self = self else { return }
+                if self.config.autoStopOnTerminate && self.isRecording {
+                    self.emergencyStopSession()
+                }
             }
             .store(in: &cancellables)
+
+        // Memory warning - optionally save checkpoint
+        NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                if self.isRecording && self.config.enableCrashRecovery {
+                    self.saveCrashRecoveryData()
+                    if self.config.debugLogging {
+                        print("[SessionReplay] Memory warning - crash recovery data saved")
+                    }
+                }
+            }
+            .store(in: &cancellables)
+
+        // Register for uncaught exception handling
+        setupCrashHandler()
+    }
+
+    private func setupCrashHandler() {
+        // Set up signal handlers for crashes
+        let signals: [Int32] = [SIGABRT, SIGILL, SIGSEGV, SIGFPE, SIGBUS, SIGPIPE, SIGTRAP]
+        for sig in signals {
+            signal(sig) { signal in
+                // Save crash recovery data synchronously
+                SessionReplayManager.shared.saveCrashRecoveryData()
+            }
+        }
+
+        // Set uncaught exception handler
+        NSSetUncaughtExceptionHandler { exception in
+            SessionReplayManager.shared.saveCrashRecoveryData()
+        }
     }
 
     private func startDisplayLink() {
@@ -302,6 +431,75 @@ public final class SessionReplayManager {
     private func stopDisplayLink() {
         displayLink?.invalidate()
         displayLink = nil
+    }
+
+    // MARK: - Crash Recovery
+
+    private func startCrashRecoveryTimer() {
+        stopCrashRecoveryTimer()
+        crashRecoveryTimer = Timer.scheduledTimer(withTimeInterval: config.crashRecoveryInterval, repeats: true) { [weak self] _ in
+            self?.saveCrashRecoveryData()
+        }
+    }
+
+    private func stopCrashRecoveryTimer() {
+        crashRecoveryTimer?.invalidate()
+        crashRecoveryTimer = nil
+    }
+
+    /// Save current session state for crash recovery
+    func saveCrashRecoveryData() {
+        guard isRecording, let session = currentSession else { return }
+
+        let recoveryData: [String: Any] = [
+            "sessionId": session.sessionId,
+            "startTime": session.startTime.timeIntervalSince1970,
+            "lastUpdateTime": Date().timeIntervalSince1970,
+            "frameCount": session.frameCount ?? 0,
+            "touchCount": session.touchEvents?.count ?? 0,
+            "videoSegments": session.videoSegments,
+            "userInfo": userInfo
+        ]
+
+        let recoveryPath = config.storageDirectory.appendingPathComponent("\(session.sessionId)_recovery.plist")
+
+        do {
+            let data = try PropertyListSerialization.data(fromPropertyList: recoveryData, format: .binary, options: 0)
+            try data.write(to: recoveryPath)
+        } catch {
+            if config.debugLogging {
+                print("[SessionReplay] Failed to save crash recovery data: \(error)")
+            }
+        }
+    }
+
+    private func cleanupCrashRecoveryFile(sessionId: String) {
+        let recoveryPath = config.storageDirectory.appendingPathComponent("\(sessionId)_recovery.plist")
+        try? FileManager.default.removeItem(at: recoveryPath)
+    }
+
+    /// Check for incomplete sessions from previous crashes
+    public func recoverIncompleteSessions() -> [String] {
+        let fileManager = FileManager.default
+        guard let files = try? fileManager.contentsOfDirectory(at: config.storageDirectory, includingPropertiesForKeys: nil) else {
+            return []
+        }
+
+        let recoveryFiles = files.filter { $0.pathExtension == "plist" && $0.lastPathComponent.contains("_recovery") }
+        var recoveredSessionIds: [String] = []
+
+        for file in recoveryFiles {
+            if let data = try? Data(contentsOf: file),
+               let recoveryData = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+               let sessionId = recoveryData["sessionId"] as? String {
+                recoveredSessionIds.append(sessionId)
+                if config.debugLogging {
+                    print("[SessionReplay] Found incomplete session: \(sessionId)")
+                }
+            }
+        }
+
+        return recoveredSessionIds
     }
 
     @objc private func displayLinkFired(_ link: CADisplayLink) {
@@ -511,7 +709,8 @@ public final class SessionReplayManager {
             deviceModel: getDeviceModel(),
             deviceId: UIDevice.current.identifierForVendor?.uuidString,
             locale: Locale.current.identifier,
-            timezone: TimeZone.current.identifier
+            timezone: TimeZone.current.identifier,
+            userInfo: userInfo.isEmpty ? nil : userInfo
         )
 
         // Convert touch events
@@ -528,7 +727,8 @@ public final class SessionReplayManager {
             logs: logData?.logs ?? [],
             networkRequests: logData?.networkRequests ?? [],
             screenTransitions: screenTransitions,
-            metadata: metadata
+            metadata: metadata,
+            userInfo: userInfo.isEmpty ? nil : userInfo
         )
 
         let encoder = JSONEncoder()
@@ -540,7 +740,9 @@ public final class SessionReplayManager {
         let path = config.storageDirectory.appendingPathComponent("\(session.sessionId).json")
         try? data.write(to: path)
 
-        print("[SessionReplay] Session metadata saved to: \(path)")
+        if config.debugLogging {
+            print("[SessionReplay] Session metadata saved to: \(path)")
+        }
     }
 
     private func getDeviceModel() -> String {

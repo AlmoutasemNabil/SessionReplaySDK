@@ -234,6 +234,11 @@ public final class SessionLogger {
     }
 
     private func processConsoleOutput(_ output: String, isStderr: Bool) {
+        // Skip SDK internal logs if configured
+        if config.excludeSDKLogs && output.hasPrefix("[SessionReplay]") {
+            return
+        }
+
         let level = classifyLogLevel(output, isStderr: isStderr)
 
         guard level.priority >= config.minimumLogLevel.priority else { return }
@@ -313,11 +318,11 @@ private final class ConsoleCapture {
             }
 
             if let string = String(data: data, encoding: .utf8) {
-                let lines = string.components(separatedBy: .newlines)
-                    .filter { !$0.isEmpty }
-
-                for line in lines {
-                    self.onOutput(line)
+                // Keep multi-line output together as a single log entry
+                // Only trim leading/trailing whitespace, preserve internal newlines
+                let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    self.onOutput(trimmed)
                 }
             }
         }

@@ -73,6 +73,26 @@ public struct SessionReplayConfig {
     public var storageDirectory: URL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("SessionReplays", isDirectory: true)
 
+    // MARK: - Auto Start/Stop Configuration
+
+    /// Automatically start recording when app launches
+    public var autoStartOnLaunch: Bool = false
+
+    /// Automatically stop recording when app enters background
+    public var autoStopOnBackground: Bool = true
+
+    /// Automatically stop and save recording when app terminates
+    public var autoStopOnTerminate: Bool = true
+
+    /// Enable crash recovery - saves partial session data periodically
+    public var enableCrashRecovery: Bool = true
+
+    /// Interval for crash recovery saves (in seconds)
+    public var crashRecoveryInterval: TimeInterval = 5.0
+
+    /// Print debug logs to console (set to false for production)
+    public var debugLogging: Bool = true
+
     public init() {}
 }
 
@@ -105,6 +125,10 @@ public struct SessionLoggerConfig {
 
     /// Custom log sanitizer closure
     public var logSanitizer: ((String) -> String)? = nil
+
+    /// Exclude SDK internal logs from session data (logs starting with [SessionReplay])
+    /// Set to true in production to keep session logs clean
+    public var excludeSDKLogs: Bool = true
 
     public init() {}
 }
@@ -325,6 +349,9 @@ public struct SessionMetadata: Codable {
     public let locale: String
     public let timezone: String
 
+    /// Custom user identification info (userId, email, name, etc.)
+    public var userInfo: [String: String]?
+
     public init(
         appVersion: String,
         buildNumber: String,
@@ -332,7 +359,8 @@ public struct SessionMetadata: Codable {
         deviceModel: String,
         deviceId: String?,
         locale: String,
-        timezone: String
+        timezone: String,
+        userInfo: [String: String]? = nil
     ) {
         self.appVersion = appVersion
         self.buildNumber = buildNumber
@@ -341,6 +369,7 @@ public struct SessionMetadata: Codable {
         self.deviceId = deviceId
         self.locale = locale
         self.timezone = timezone
+        self.userInfo = userInfo
     }
 }
 
@@ -360,6 +389,9 @@ public struct SessionReplayData: Codable, Identifiable {
     public let screenTransitions: [ScreenTransition]
     public let metadata: SessionMetadata
 
+    /// Custom user identification info (userId, email, name, etc.)
+    public var userInfo: [String: String]?
+
     public var id: String { sessionId }
 
     public init(
@@ -373,7 +405,8 @@ public struct SessionReplayData: Codable, Identifiable {
         logs: [LogEntry],
         networkRequests: [NetworkEntry],
         screenTransitions: [ScreenTransition],
-        metadata: SessionMetadata
+        metadata: SessionMetadata,
+        userInfo: [String: String]? = nil
     ) {
         self.sessionId = sessionId
         self.startTime = startTime
@@ -386,6 +419,7 @@ public struct SessionReplayData: Codable, Identifiable {
         self.networkRequests = networkRequests
         self.screenTransitions = screenTransitions
         self.metadata = metadata
+        self.userInfo = userInfo
     }
 
     /// Export as JSON data

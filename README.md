@@ -1,6 +1,7 @@
 # SessionReplaySDK
 
 <p align="center">
+  <img src="https://img.shields.io/badge/Version-0.2.0-blue.svg" alt="Version 0.2.0"/>
   <img src="https://img.shields.io/badge/Platform-iOS%2015%2B-blue.svg" alt="Platform iOS 15+"/>
   <img src="https://img.shields.io/badge/Swift-5.9%2B-orange.svg" alt="Swift 5.9+"/>
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="MIT License"/>
@@ -30,7 +31,11 @@
 | **Video Recording** | H.264 encoded screen capture with configurable quality and frame rate |
 | **Touch Visualization** | Record and overlay touch events with visual indicators |
 | **Console Log Capture** | Automatically intercept `print()`, `NSLog()`, and stderr |
-| **Network Tracking** | Monitor all HTTP/HTTPS requests with full details |
+| **Network Tracking** | Monitor all HTTP/HTTPS requests (works with Alamofire SSL pinning) |
+| **User Identification** | Attach user info (userId, email, custom data) to sessions |
+| **Auto Start/Stop** | Configurable automatic session lifecycle management |
+| **Crash Recovery** | Periodic checkpoints to recover sessions after crashes |
+| **App Groups** | Share session data between app and extensions |
 | **Screen Transitions** | Track navigation flow between screens |
 | **Synchronized Timeline** | All events timestamped for video sync playback |
 | **Local Storage** | Save sessions locally with JSON metadata |
@@ -50,7 +55,7 @@
 **Package.swift:**
 ```swift
 dependencies: [
-    .package(url: "https://github.com/AlmoutasemNabil/SessionReplaySDK", from: "1.0.0")
+    .package(url: "https://github.com/AlmoutasemNabil/SessionReplaySDK", from: "0.2.0")
 ]
 ```
 
@@ -64,16 +69,16 @@ import SessionReplaySDK
 @main
 struct MyApp: App {
     init() {
+        var config = SessionReplayConfig()
+        config.captureFrameRate = 10
+        config.jpegCompressionQuality = 0.7
+        config.autoStartOnLaunch = false    // Manual control
+        config.enableCrashRecovery = true   // Save on crash
+        config.debugLogging = false         // Disable in production
+
         SessionReplaySDK.configure(
-            videoConfig: SessionReplayConfig(
-                captureFrameRate: 10,
-                jpegCompressionQuality: 0.7,
-                captureScale: 0.5
-            ),
-            logConfig: SessionLoggerConfig(
-                captureConsoleLogs: true,
-                captureNetworkRequests: true
-            )
+            videoConfig: config,
+            logConfig: SessionLoggerConfig()
         )
     }
 
@@ -85,7 +90,26 @@ struct MyApp: App {
 }
 ```
 
-### 2. Start/Stop Recording
+### 2. Identify Users
+
+```swift
+// After user logs in
+SessionReplaySDK.identifyUser(
+    userId: "user_123",
+    email: "user@example.com",
+    name: "John Doe",
+    additionalInfo: ["plan": "premium", "branchId": "branch_456"]
+)
+
+// Or set custom info directly
+SessionReplaySDK.setUserInfo([
+    "userId": "123",
+    "email": "user@example.com",
+    "customField": "value"
+])
+```
+
+### 3. Start/Stop Recording
 
 ```swift
 // Start recording
@@ -100,7 +124,7 @@ if SessionReplaySDK.isRecording {
 }
 ```
 
-### 3. Track Screens (SwiftUI)
+### 4. Track Screens (SwiftUI)
 
 ```swift
 struct HomeView: View {
@@ -113,7 +137,7 @@ struct HomeView: View {
 }
 ```
 
-### 4. Custom Logging
+### 5. Custom Logging
 
 ```swift
 SessionReplaySDK.debug("Debug: User opened settings")
@@ -122,7 +146,7 @@ SessionReplaySDK.warning("Warning: Low storage")
 SessionReplaySDK.error("Error: Network timeout")
 ```
 
-### 5. Upload Sessions
+### 6. Upload Sessions
 
 ```swift
 // Configure endpoint
@@ -166,7 +190,18 @@ SessionReplaySDK.uploadAllSessions { results in
 | `autoMaskSecureTextFields` | `true` | Auto-mask password fields |
 | `autoMaskViewClasses` | `[]` | Custom classes to auto-mask |
 | `maxStorageSize` | `50MB` | Max local storage |
-| `maxSessionDuration` | `300s` | Auto-stop after duration |
+| `storageDirectory` | Documents | Custom storage location |
+
+### Auto Start/Stop (SessionReplayConfig)
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `autoStartOnLaunch` | `false` | Start recording on app launch |
+| `autoStopOnBackground` | `true` | Stop when app enters background |
+| `autoStopOnTerminate` | `true` | Emergency save on terminate |
+| `enableCrashRecovery` | `true` | Save checkpoints periodically |
+| `crashRecoveryInterval` | `5.0` | Seconds between checkpoints |
+| `debugLogging` | `true` | Print debug logs to console |
 
 ### Logging (SessionLoggerConfig)
 
@@ -180,6 +215,7 @@ SessionReplaySDK.uploadAllSessions { results in
 | `redactedHeaders` | `[auth, cookie...]` | Headers to redact |
 | `excludedURLPatterns` | `[]` | URL regex patterns to skip |
 | `logSanitizer` | `nil` | Custom sanitization closure |
+| `excludeSDKLogs` | `true` | Exclude SDK internal logs from session data |
 
 ### Upload (SessionUploadConfig)
 
@@ -192,6 +228,80 @@ SessionReplaySDK.uploadAllSessions { results in
 | `timeoutInterval` | `120s` | Request timeout |
 | `deleteAfterUpload` | `false` | Remove local files |
 
+## App Group Support
+
+Share session data between your main app and extensions:
+
+```swift
+// Configure with App Group
+SessionReplaySDK.configureWithAppGroup(
+    "group.com.yourcompany.yourapp",
+    videoConfig: config,
+    logConfig: logConfig
+)
+
+// Or manually set storage directory
+var config = SessionReplayConfig()
+if let containerURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.com.yourapp") {
+    config.storageDirectory = containerURL.appendingPathComponent("SessionReplays", isDirectory: true)
+}
+SessionReplaySDK.configure(videoConfig: config)
+```
+
+## User Identification
+
+Attach user info to sessions for easier debugging:
+
+```swift
+// Simple identification
+SessionReplaySDK.identifyUser(
+    userId: "user_123",
+    email: "user@example.com",
+    name: "John Doe"
+)
+
+// With additional custom data
+SessionReplaySDK.identifyUser(
+    userId: "cashier_456",
+    email: "cashier@foodics.com",
+    additionalInfo: [
+        "branchId": "branch_123",
+        "role": "cashier",
+        "shiftId": "shift_789"
+    ]
+)
+
+// Set individual values
+SessionReplaySDK.setUserInfo(key: "subscriptionTier", value: "premium")
+
+// Clear on logout
+SessionReplaySDK.clearUserInfo()
+
+// Access current info
+let currentUser = SessionReplaySDK.userInfo
+```
+
+User info is saved in both `metadata.userInfo` and root `userInfo` in the session JSON.
+
+## Crash Recovery
+
+The SDK automatically saves session checkpoints:
+
+```swift
+var config = SessionReplayConfig()
+config.enableCrashRecovery = true      // Enable checkpoints
+config.crashRecoveryInterval = 3.0     // Save every 3 seconds
+
+SessionReplaySDK.configure(videoConfig: config)
+
+// Check for incomplete sessions after app restart
+let incompleteSessions = SessionReplaySDK.recoverIncompleteSessions()
+for sessionId in incompleteSessions {
+    print("Found incomplete session: \(sessionId)")
+    // Video segments may be available even if session didn't complete
+}
+```
+
 ## Session Data Format
 
 ```json
@@ -202,6 +312,11 @@ SessionReplaySDK.uploadAllSessions { results in
   "durationMs": 300000,
   "frameCount": 3000,
   "videoSegments": ["session_segment0.mp4"],
+  "userInfo": {
+    "userId": "user_123",
+    "email": "user@example.com",
+    "branchId": "branch_456"
+  },
   "touches": [
     {"timestamp": 1500, "location": {"x": 200, "y": 400}, "phase": 0}
   ],
@@ -218,7 +333,11 @@ SessionReplaySDK.uploadAllSessions { results in
     "appVersion": "1.0.0",
     "osVersion": "17.0",
     "deviceModel": "iPhone15,2",
-    "locale": "en_US"
+    "locale": "en_US",
+    "userInfo": {
+      "userId": "user_123",
+      "email": "user@example.com"
+    }
   }
 }
 ```
@@ -234,6 +353,12 @@ RecordingControlView()
 // Sessions list with upload
 SessionsListView()
 
+// Activity timeline (live during recording)
+LiveActivityView()
+
+// Activity timeline (for completed sessions)
+ActivityTimelineView(session: selectedSession)
+
 // Session player
 SessionReplayViewer(session: selectedSession)
 
@@ -242,6 +367,9 @@ SessionReplayViewer(session: selectedSession)
 
 // Touch indicators overlay
 .withTouchIndicators()
+
+// Mark sensitive content
+.sensitiveContent()
 ```
 
 ### UIKit
@@ -259,6 +387,16 @@ present(debugVC, animated: true)
 // Mark sensitive views
 passwordField.markAsSensitive()
 ```
+
+## Network Capture
+
+The SDK captures all URLSession-based network requests, including:
+
+- Direct URLSession usage
+- Alamofire (including custom sessions with SSL pinning)
+- FNetwork and other URLSession-based libraries
+
+No additional configuration needed—network capture works automatically.
 
 ## Upload API
 
@@ -353,6 +491,27 @@ SessionReplaySDK/
 │   └── UIKitIntegration.swift    # UIKit support
 └── SessionReplaySDK.swift        # Public facade
 ```
+
+## Changelog
+
+### Version 0.2.0
+- **User Identification**: New `identifyUser()` and `setUserInfo()` APIs to attach user data to sessions
+- **App Group Support**: Configure custom storage directory for sharing data between app and extensions
+- **Auto Start/Stop**: New config options for automatic session lifecycle management
+- **Crash Recovery**: Periodic checkpoints to recover sessions after crashes
+- **Network Capture Improvements**: Works with all URLSession-based networking including Alamofire with SSL pinning
+- **Activity Timeline Views**: New `LiveActivityView` and `ActivityTimelineView` SwiftUI components
+- **Debug Logging Control**: New `debugLogging` config to reduce console noise in production
+- **Removed Verbose Touch Logging**: Touch began/ended events no longer spam the console
+
+### Version 0.1.0
+- Initial release
+- Video recording with H.264 encoding
+- Touch event capture and visualization
+- Console log interception
+- Network request monitoring
+- SwiftUI and UIKit integration
+- Cloud upload support
 
 ## Contributing
 

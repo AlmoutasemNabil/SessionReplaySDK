@@ -78,6 +78,24 @@ public final class VideoWriter {
         }
     }
 
+    /// Synchronous finish writing for emergency saves (crash/terminate)
+    public func finishWritingSync() {
+        writingQueue.sync { [weak self] in
+            guard let self = self, self.isWriting else { return }
+
+            self.videoInput?.markAsFinished()
+
+            let semaphore = DispatchSemaphore(value: 0)
+            self.assetWriter?.finishWriting {
+                self.isWriting = false
+                semaphore.signal()
+            }
+
+            // Wait with timeout to avoid blocking forever
+            _ = semaphore.wait(timeout: .now() + 2.0)
+        }
+    }
+
     private func setupWriter() {
         try? FileManager.default.removeItem(at: outputURL)
 

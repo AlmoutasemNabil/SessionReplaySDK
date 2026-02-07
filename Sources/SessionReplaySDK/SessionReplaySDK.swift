@@ -28,7 +28,7 @@ import Foundation
 public enum SessionReplaySDK {
 
     /// SDK version
-    public static let version = "0.0.1"
+    public static let version = "0.2.0"
 
     // MARK: - Configuration
 
@@ -230,12 +230,57 @@ public enum SessionReplaySDK {
         SessionLogger.shared.error(message)
     }
 
+    // MARK: - User Identification
+
+    #if canImport(UIKit)
+    /// Set custom user info for session identification
+    /// - Parameter info: Dictionary of user info (e.g., ["userId": "123", "email": "user@example.com"])
+    public static func setUserInfo(_ info: [String: String]) {
+        SessionReplayManager.shared.setUserInfo(info)
+    }
+
+    /// Update a single user info value
+    public static func setUserInfo(key: String, value: String) {
+        SessionReplayManager.shared.setUserInfo(key: key, value: value)
+    }
+
+    /// Clear all user info
+    public static func clearUserInfo() {
+        SessionReplayManager.shared.clearUserInfo()
+    }
+
+    /// Identify user with common fields
+    /// - Parameters:
+    ///   - userId: Required user identifier
+    ///   - email: Optional email address
+    ///   - name: Optional display name
+    ///   - additionalInfo: Optional additional key-value pairs
+    public static func identifyUser(userId: String, email: String? = nil, name: String? = nil, additionalInfo: [String: String]? = nil) {
+        SessionReplayManager.shared.identifyUser(userId: userId, email: email, name: name, additionalInfo: additionalInfo)
+    }
+
+    /// Get current user info
+    public static var userInfo: [String: String] {
+        SessionReplayManager.shared.userInfo
+    }
+    #endif
+
     // MARK: - Screen Tracking
 
     #if canImport(UIKit)
     /// Track a screen view
     public static func trackScreen(_ screenName: String) {
         SessionReplayManager.shared.trackScreen(screenName)
+    }
+    #endif
+
+    // MARK: - Crash Recovery
+
+    #if canImport(UIKit)
+    /// Check for incomplete sessions from previous crashes
+    /// - Returns: Array of session IDs that were found in recovery state
+    public static func recoverIncompleteSessions() -> [String] {
+        SessionReplayManager.shared.recoverIncompleteSessions()
     }
     #endif
 }
