@@ -546,6 +546,7 @@ public struct ActivityTimelineView: View {
     @State private var filterType: ActivityFilterType = .all
     @State private var searchText: String = ""
     @State private var expandedEntryId: String? = nil
+    @State private var cachedActivity: [SDKActivityEntry] = []
 
     public enum ActivityFilterType: String, CaseIterable {
         case all = "All"
@@ -567,19 +568,13 @@ public struct ActivityTimelineView: View {
         self.session = session
     }
 
-    // Build activity list, filtering out SDK touch logs
+    // Cached activity list (built once on appear)
     var allActivity: [SDKActivityEntry] {
-        var entries: [SDKActivityEntry] = []
-        let filteredLogs = session.logs.filter { log in
-            !log.message.contains("[SessionReplay] Touch")
-        }
-        entries.append(contentsOf: filteredLogs.map { .log($0) })
-        entries.append(contentsOf: session.networkRequests.map { .network($0) })
-        return entries.sorted { $0.timestamp < $1.timestamp }
+        cachedActivity
     }
 
     var filteredActivity: [SDKActivityEntry] {
-        var result = allActivity
+        var result = cachedActivity
 
         // Apply type filter
         switch filterType {
@@ -614,6 +609,17 @@ public struct ActivityTimelineView: View {
         return result
     }
 
+    private func buildActivityList() {
+        var entries: [SDKActivityEntry] = []
+        let filteredLogs = session.logs.filter { log in
+            !log.message.contains("[SessionReplay] Touch")
+        }
+        entries.append(contentsOf: filteredLogs.map { .log($0) })
+        entries.append(contentsOf: session.networkRequests.map { .network($0) })
+        entries.sort { $0.timestamp < $1.timestamp }
+        cachedActivity = entries
+    }
+
     public var body: some View {
         VStack(spacing: 0) {
             // Header with stats
@@ -629,6 +635,9 @@ public struct ActivityTimelineView: View {
             timelineSection
         }
         .background(Color(.systemGroupedBackground))
+        .onAppear {
+            buildActivityList()
+        }
     }
 
     private var headerSection: some View {
@@ -696,11 +705,11 @@ public struct ActivityTimelineView: View {
     }
 
     private var timelineSection: some View {
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                if filteredActivity.isEmpty {
-                    emptyStateView
-                } else {
+        Group {
+            if filteredActivity.isEmpty {
+                emptyStateView
+            } else {
+                List {
                     ForEach(Array(filteredActivity.enumerated()), id: \.element.id) { index, entry in
                         ActivityTimelineRow(
                             entry: entry,
@@ -708,6 +717,9 @@ public struct ActivityTimelineView: View {
                             isFirst: index == 0,
                             isLast: index == filteredActivity.count - 1
                         )
+                        .listRowInsets(EdgeInsets())
+                        .listRowSeparator(.hidden)
+                        .contentShape(Rectangle())
                         .onTapGesture {
                             withAnimation(.easeInOut(duration: 0.2)) {
                                 if expandedEntryId == entry.id {
@@ -719,8 +731,8 @@ public struct ActivityTimelineView: View {
                         }
                     }
                 }
+                .listStyle(.plain)
             }
-            .padding(.vertical, 8)
         }
     }
 
@@ -744,13 +756,19 @@ public struct ActivityTimelineView: View {
 
     private func countForFilter(_ type: ActivityFilterType) -> Int {
         switch type {
-        case .all: return allActivity.count
-        case .logs: return session.logs.filter { !$0.message.contains("[SessionReplay] Touch") }.count
-        case .network: return session.networkRequests.count
+        case .all:
+            return cachedActivity.count
+        case .logs:
+            return cachedActivity.filter { if case .log = $0 { return true } else { return false } }.count
+        case .network:
+            return cachedActivity.filter { if case .network = $0 { return true } else { return false } }.count
         case .errors:
-            let errorLogs = session.logs.filter { $0.level == .error || $0.level == .warning }.count
-            let errorRequests = session.networkRequests.filter { ($0.statusCode ?? 0) >= 400 }.count
-            return errorLogs + errorRequests
+            return cachedActivity.filter { entry in
+                switch entry {
+                case .log(let log): return log.level == .error || log.level == .warning
+                case .network(let req): return (req.statusCode ?? 0) >= 400
+                }
+            }.count
         }
     }
 }
@@ -813,6 +831,52 @@ struct ActivityTimelineRow: View {
         }
         .padding(.horizontal, 16)
         .background(isExpanded ? Color.blue.opacity(0.05) : Color.clear)
+        .contextMenu {
+            Button(action: { copyToClipboard() }) {
+                Label("Copy", systemImage: "doc.on.doc")
+            }
+            Button(action: { copyToClipboard(fullDetails: true) }) {
+                Label("Copy Full Details", systemImage: "doc.on.doc.fill")
+            }
+        }
+    }
+
+    private func copyToClipboard(fullDetails: Bool = false) {
+        let text: String
+        switch entry {
+        case .log(let log):
+            if fullDetails {
+                text = """
+                [\(log.level.rawValue.uppercased())] \(log.message)
+                Timestamp: \(formatTimestamp(entry.timestamp))
+                Source: \(log.source)
+                """
+            } else {
+                text = log.message
+            }
+        case .network(let req):
+            if fullDetails {
+                var details = """
+                \(req.method) \(req.url)
+                Status: \(req.statusCode ?? 0)
+                Duration: \(String(format: "%.0fms", req.duration ?? 0))
+                Timestamp: \(formatTimestamp(entry.timestamp))
+                """
+                if let body = req.requestBody, !body.isEmpty {
+                    details += "\n\nRequest Body:\n\(body)"
+                }
+                if let body = req.responseBody, !body.isEmpty {
+                    details += "\n\nResponse Body:\n\(body)"
+                }
+                if let error = req.error {
+                    details += "\n\nError: \(error)"
+                }
+                text = details
+            } else {
+                text = "\(req.method) \(req.url) → \(req.statusCode ?? 0)"
+            }
+        }
+        UIPasteboard.general.string = text
     }
 
     private var dotColor: Color {
@@ -1043,21 +1107,16 @@ struct ExpandableSection<Content: View>: View {
 
 /// A live activity view that updates in real-time during recording
 public struct LiveActivityView: View {
-    @State private var logs: [LogEntry] = []
-    @State private var networkRequests: [NetworkEntry] = []
+    @State private var allActivity: [SDKActivityEntry] = []
     @State private var isRecording = false
+    @State private var lastUpdateCount = 0
 
     private let timer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
 
-    public init() {}
+    /// Maximum entries to display for performance
+    private let maxDisplayEntries = 500
 
-    var allActivity: [SDKActivityEntry] {
-        var entries: [SDKActivityEntry] = []
-        let filteredLogs = logs.filter { !$0.message.contains("[SessionReplay] Touch") }
-        entries.append(contentsOf: filteredLogs.map { .log($0) })
-        entries.append(contentsOf: networkRequests.map { .network($0) })
-        return entries.sorted { $0.timestamp < $1.timestamp }
-    }
+    public init() {}
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -1091,20 +1150,20 @@ public struct LiveActivityView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(spacing: 0) {
-                            ForEach(Array(allActivity.enumerated()), id: \.element.id) { index, entry in
-                                ActivityTimelineRow(
-                                    entry: entry,
-                                    isExpanded: false,
-                                    isFirst: index == 0,
-                                    isLast: index == allActivity.count - 1
-                                )
-                                .id(entry.id)
-                            }
+                    List {
+                        ForEach(Array(allActivity.suffix(maxDisplayEntries).enumerated()), id: \.element.id) { index, entry in
+                            ActivityTimelineRow(
+                                entry: entry,
+                                isExpanded: false,
+                                isFirst: index == 0,
+                                isLast: index == min(allActivity.count, maxDisplayEntries) - 1
+                            )
+                            .listRowInsets(EdgeInsets())
+                            .listRowSeparator(.hidden)
+                            .id(entry.id)
                         }
-                        .padding(.vertical, 8)
                     }
+                    .listStyle(.plain)
                     .onChange(of: allActivity.count) { _ in
                         if let lastId = allActivity.last?.id {
                             withAnimation {
@@ -1123,8 +1182,22 @@ public struct LiveActivityView: View {
 
     private func updateActivity() {
         isRecording = SessionReplayManager.shared.isRecording
-        logs = SessionLogger.shared.getLogs()
-        networkRequests = SessionLogger.shared.getNetworkRequests()
+
+        let logs = SessionLogger.shared.getLogs()
+        let networkRequests = SessionLogger.shared.getNetworkRequests()
+        let totalCount = logs.count + networkRequests.count
+
+        // Only rebuild if count changed (optimization)
+        guard totalCount != lastUpdateCount else { return }
+        lastUpdateCount = totalCount
+
+        var entries: [SDKActivityEntry] = []
+        let filteredLogs = logs.filter { !$0.message.contains("[SessionReplay] Touch") }
+        entries.append(contentsOf: filteredLogs.map { .log($0) })
+        entries.append(contentsOf: networkRequests.map { .network($0) })
+        entries.sort { $0.timestamp < $1.timestamp }
+
+        allActivity = entries
     }
 }
 

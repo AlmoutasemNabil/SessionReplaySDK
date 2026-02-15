@@ -20,6 +20,10 @@ import UIKit
 
 /// Configuration options for session replay capture
 public struct SessionReplayConfig {
+    /// Enable video recording (set to false for logs-only mode)
+    /// When disabled, only console logs and network requests are captured
+    public var enableVideoRecording: Bool = true
+
     /// Frames per second to capture (default: 1 fps for efficiency)
     public var captureFrameRate: Int = 1
 

@@ -129,7 +129,8 @@ public final class SessionReplayManager {
             return
         }
 
-        print("[SessionReplay] Starting session...")
+        let mode = config.enableVideoRecording ? "video + logs" : "logs only"
+        print("[SessionReplay] Starting session (\(mode))...")
 
         ensureStorageDirectory()
 
@@ -141,28 +142,34 @@ public final class SessionReplayManager {
         viewTreeHash = 0
 
         if let session = currentSession {
-            let videoPath = config.storageDirectory
-                .appendingPathComponent("\(session.sessionId)_segment0.mp4")
-            let screenSize = UIScreen.main.bounds.size
-            let captureSize = CGSize(
-                width: screenSize.width * config.captureScale,
-                height: screenSize.height * config.captureScale
-            )
+            // Only setup video recording if enabled
+            if config.enableVideoRecording {
+                let videoPath = config.storageDirectory
+                    .appendingPathComponent("\(session.sessionId)_segment0.mp4")
+                let screenSize = UIScreen.main.bounds.size
+                let captureSize = CGSize(
+                    width: screenSize.width * config.captureScale,
+                    height: screenSize.height * config.captureScale
+                )
 
-            videoWriter = VideoWriter(
-                outputURL: videoPath,
-                size: captureSize,
-                bitrate: config.videoBitrate
-            )
-            videoWriter?.startWriting()
+                videoWriter = VideoWriter(
+                    outputURL: videoPath,
+                    size: captureSize,
+                    bitrate: config.videoBitrate
+                )
+                videoWriter?.startWriting()
 
-            currentSession?.videoSegments.append(videoPath.lastPathComponent)
+                currentSession?.videoSegments.append(videoPath.lastPathComponent)
+            }
 
-            // Start logging capture
+            // Start logging capture (always enabled)
             SessionLogger.shared.startCapture(sessionId: session.sessionId, startTime: session.startTime)
         }
 
-        startDisplayLink()
+        // Only start display link for video recording
+        if config.enableVideoRecording {
+            startDisplayLink()
+        }
 
         // Start crash recovery timer if enabled
         if config.enableCrashRecovery {
@@ -187,19 +194,35 @@ public final class SessionReplayManager {
         // Stop logging
         let logData = SessionLogger.shared.stopCapture()
 
-        videoWriter?.finishWriting { [weak self] in
-            guard let self = self else { return }
+        // If video recording is enabled, finish video then save
+        if config.enableVideoRecording {
+            videoWriter?.finishWriting { [weak self] in
+                guard let self = self else { return }
 
-            self.currentSession?.endTime = Date()
+                self.currentSession?.endTime = Date()
 
-            if let session = self.currentSession {
-                self.saveSessionMetadata(session, logData: logData)
-                self.cleanupCrashRecoveryFile(sessionId: session.sessionId)
+                if let session = self.currentSession {
+                    self.saveSessionMetadata(session, logData: logData)
+                    self.cleanupCrashRecoveryFile(sessionId: session.sessionId)
+                }
+
+                if self.config.debugLogging {
+                    print("[SessionReplay] Session stopped. Frames captured: \(self.currentSession?.frameCount ?? 0)")
+                    print("[SessionReplay] Touch events: \(self.currentSession?.touchEvents?.count ?? 0)")
+                }
+            }
+        } else {
+            // Logs-only mode - save immediately
+            currentSession?.endTime = Date()
+
+            if let session = currentSession {
+                saveSessionMetadata(session, logData: logData)
+                cleanupCrashRecoveryFile(sessionId: session.sessionId)
             }
 
-            if self.config.debugLogging {
-                print("[SessionReplay] Session stopped. Frames captured: \(self.currentSession?.frameCount ?? 0)")
-                print("[SessionReplay] Touch events: \(self.currentSession?.touchEvents?.count ?? 0)")
+            if config.debugLogging {
+                print("[SessionReplay] Session stopped (logs only). Log entries: \(logData?.logs.count ?? 0)")
+                print("[SessionReplay] Network requests: \(logData?.networkRequests.count ?? 0)")
             }
         }
     }
@@ -219,8 +242,10 @@ public final class SessionReplayManager {
         // Get current log data
         let logData = SessionLogger.shared.stopCapture()
 
-        // Finish video writing synchronously if possible
-        videoWriter?.finishWritingSync()
+        // Finish video writing synchronously if video is enabled
+        if config.enableVideoRecording {
+            videoWriter?.finishWritingSync()
+        }
 
         currentSession?.endTime = Date()
 

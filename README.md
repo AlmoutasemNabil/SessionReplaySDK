@@ -90,7 +90,26 @@ struct MyApp: App {
 }
 ```
 
-### 2. Identify Users
+### 2. Logs-Only Mode (No Video)
+
+For lightweight logging without video recording:
+
+```swift
+var config = SessionReplayConfig()
+config.enableVideoRecording = false  // Disable video, capture logs only
+
+SessionReplaySDK.configure(
+    videoConfig: config,
+    logConfig: SessionLoggerConfig()
+)
+
+// Start/stop works the same way
+SessionReplaySDK.start()
+// ... session captures console logs and network requests only
+SessionReplaySDK.stop()
+```
+
+### 3. Identify Users
 
 ```swift
 // After user logs in
@@ -178,6 +197,7 @@ SessionReplaySDK.uploadAllSessions { results in
 
 | Option | Default | Description |
 |--------|---------|-------------|
+| `enableVideoRecording` | `true` | Enable video recording (false for logs-only mode) |
 | `captureFrameRate` | `1` | Frames per second (1-30) |
 | `jpegCompressionQuality` | `0.3` | JPEG quality (0.0-1.0) |
 | `captureScale` | `1.0` | Resolution scale (0.25-1.0) |
