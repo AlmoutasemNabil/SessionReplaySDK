@@ -181,7 +181,16 @@ public final class SessionReplayManager {
 
     /// Stop the current recording session
     public func stopSession() {
-        guard isRecording else { return }
+        stopSession(completion: nil)
+    }
+
+    /// Stop the current recording session with a completion handler
+    /// - Parameter completion: Called on the main thread after the session is fully saved
+    public func stopSession(completion: (() -> Void)?) {
+        guard isRecording else {
+            completion.map { cb in DispatchQueue.main.async { cb() } }
+            return
+        }
 
         if config.debugLogging {
             print("[SessionReplay] Stopping session...")
@@ -197,7 +206,10 @@ public final class SessionReplayManager {
         // If video recording is enabled, finish video then save
         if config.enableVideoRecording {
             videoWriter?.finishWriting { [weak self] in
-                guard let self = self else { return }
+                guard let self = self else {
+                    DispatchQueue.main.async { completion?() }
+                    return
+                }
 
                 self.currentSession?.endTime = Date()
 
@@ -210,6 +222,8 @@ public final class SessionReplayManager {
                     print("[SessionReplay] Session stopped. Frames captured: \(self.currentSession?.frameCount ?? 0)")
                     print("[SessionReplay] Touch events: \(self.currentSession?.touchEvents?.count ?? 0)")
                 }
+
+                DispatchQueue.main.async { completion?() }
             }
         } else {
             // Logs-only mode - save immediately
@@ -223,6 +237,18 @@ public final class SessionReplayManager {
             if config.debugLogging {
                 print("[SessionReplay] Session stopped (logs only). Log entries: \(logData?.logs.count ?? 0)")
                 print("[SessionReplay] Network requests: \(logData?.networkRequests.count ?? 0)")
+            }
+
+            DispatchQueue.main.async { completion?() }
+        }
+    }
+
+    /// Stop the current recording session (async version)
+    @available(iOS 13.0, *)
+    public func stopSessionAsync() async {
+        await withCheckedContinuation { continuation in
+            stopSession {
+                continuation.resume()
             }
         }
     }

@@ -106,6 +106,19 @@ public enum SessionReplaySDK {
         SessionReplayManager.shared.stopSession()
     }
 
+    /// Stop the current recording session with a completion handler
+    /// - Parameter completion: Called on the main thread after the session is fully saved (video finalized, metadata written)
+    public static func stopSession(completion: @escaping () -> Void) {
+        SessionReplayManager.shared.stopSession(completion: completion)
+    }
+
+    /// Stop the current recording session (async version)
+    /// Awaits until the session is fully saved (video finalized, metadata written)
+    @available(iOS 13.0, *)
+    public static func stopSessionAsync() async {
+        await SessionReplayManager.shared.stopSessionAsync()
+    }
+
     /// Check if currently recording
     public static var isRecording: Bool {
         SessionReplayManager.shared.isRecording
