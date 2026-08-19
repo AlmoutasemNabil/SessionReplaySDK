@@ -1,4 +1,4 @@
-# SessionReplaySDK
+# SessionReplaySDK — iOS Session Recording SDK
 
 <p align="center">
   <a href="https://swiftpackageindex.com/AlmoutasemNabil/SessionReplaySDK"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2FAlmoutasemNabil%2FSessionReplaySDK%2Fbadge%3Ftype%3Dswift-versions" alt="Swift versions"/></a>
