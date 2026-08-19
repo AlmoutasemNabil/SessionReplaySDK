@@ -1,7 +1,7 @@
 # SessionReplaySDK
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-0.2.1-blue.svg" alt="Version 0.2.1"/>
+  <img src="https://img.shields.io/badge/Version-0.2.2-blue.svg" alt="Version 0.2.2"/>
   <img src="https://img.shields.io/badge/Platform-iOS%2015%2B-blue.svg" alt="Platform iOS 15+"/>
   <img src="https://img.shields.io/badge/Swift-5.9%2B-orange.svg" alt="Swift 5.9+"/>
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="MIT License"/>
@@ -485,6 +485,28 @@ PaymentForm()
     .sensitiveContent(maskColor: .black)
 ```
 
+**Opting a view out of automatic masking:**
+
+When `autoMaskTextFields` is on, a single field can be kept visible without
+turning masking off app-wide:
+
+```swift
+// SwiftUI
+TextField("Search products", text: $query)
+    .unmaskedContent()
+
+// UIKit
+searchField.markAsUnmasked()
+```
+
+The opt-out applies by frame, so marking a container exposes the auto-masked
+fields inside it. Two rules always win over it:
+
+- Views marked `markAsSensitive()` / `.sensitiveContent()` stay masked.
+- **Secure text fields (`isSecureTextEntry`) are never exposed by an opt-out**,
+  even when nested inside an unmasked container. Use `autoMaskSecureTextFields`
+  if you genuinely need to disable password masking.
+
 ### Additional Privacy Features
 
 - **Header Redaction**: Authorization, Cookie, API keys auto-redacted from network logs
@@ -513,6 +535,12 @@ SessionReplaySDK/
 ```
 
 ## Changelog
+
+### Version 0.2.2
+- **Security fix — an unmask opt-out can no longer expose a password field.** `markAsUnmasked()` / `.unmaskedContent()` exempted a view from *all* automatic masking, including `isSecureTextEntry` fields, so opting a container out (e.g. a whole form section) silently revealed any password field inside it in the recorded video. Secure text entry is now never exposed by an opt-out; `autoMaskSecureTextFields` is still honoured as an explicit global setting.
+- **Fix: `redactedHeaders` is now genuinely case-insensitive**, as documented. Only the incoming header name was lower-cased, not the configured set, so a config of `["Authorization"]` redacted nothing and the token was written into the captured session log. Both sides are normalised now.
+- **Tests**: added a `SessionReplaySDKTests` target covering masking (auto-mask, opt-out precedence, secure-field guarantees, frame geometry) and capture gating (nothing captured without an active session, header redaction, body truncation).
+- **CI**: GitHub Actions workflow builds and tests on an iOS simulator for every pull request, plus a device-architecture build.
 
 ### Version 0.2.1
 - **Touch capture no longer swizzles `UIWindow.sendEvent(_:)`**: touches are now observed by a passive, never-recognizing gesture recognizer attached to each window. The swizzle placed the SDK on the call stack of every touch dispatch, so any `NSException` raised by UIKit or by app code during touch handling (e.g. the iOS 26 TextKit 2 crash in `-[UITextField _visualSelectionRangeForExtent:…]` when dragging a text-selection handle) was misattributed to `SessionReplayManager.sr_sendEvent` in crash reporters. The SDK no longer wraps UIKit's event pipeline at all.
