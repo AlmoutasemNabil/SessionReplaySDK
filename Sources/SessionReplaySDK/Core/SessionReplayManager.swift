@@ -613,7 +613,7 @@ public final class SessionReplayManager {
     }
 
     /// Collect frames of all sensitive views that should be masked
-    private func collectSensitiveViewFrames(in view: UIView) -> [CGRect] {
+    func collectSensitiveViewFrames(in view: UIView) -> [CGRect] {
         // Pass 1: frames explicitly exempted from auto-masking (markAsUnmasked / unmaskedContent)
         var unmasked: [CGRect] = []
         collectUnmaskedFramesRecursive(view, rootView: view, frames: &unmasked)
@@ -642,10 +642,13 @@ public final class SessionReplayManager {
             return // Don't check children of masked views
         }
 
-        // Auto-masking can be opted out of per view / per frame
-        if isAutoMasked(view) && !isCovered(frameInRoot, by: unmasked) {
-            frames.append(frameInRoot)
-            return
+        // Auto-masking can be opted out of per view / per frame, except for
+        // content that must never be exposed by an opt-out (secure text entry).
+        if isAutoMasked(view) {
+            if isNeverUnmaskable(view) || !isCovered(frameInRoot, by: unmasked) {
+                frames.append(frameInRoot)
+                return
+            }
         }
 
         // Recurse into subviews
@@ -655,7 +658,7 @@ public final class SessionReplayManager {
     }
 
     /// True when at least 90% of `frame` lies inside one of `regions`.
-    private func isCovered(_ frame: CGRect, by regions: [CGRect]) -> Bool {
+    func isCovered(_ frame: CGRect, by regions: [CGRect]) -> Bool {
         guard !regions.isEmpty, frame.width > 0, frame.height > 0 else { return false }
         let area = frame.width * frame.height
         return regions.contains { region in
@@ -665,7 +668,18 @@ public final class SessionReplayManager {
         }
     }
 
-    private func isExplicitlySensitive(_ view: UIView) -> Bool {
+    /// Content that an unmask opt-out must never be able to expose, no matter
+    /// how it is marked or what it is nested inside. `autoMaskSecureTextFields`
+    /// is still honoured: this only prevents `markAsUnmasked()` /
+    /// `.unmaskedContent()` from revealing a view that would otherwise be masked.
+    func isNeverUnmaskable(_ view: UIView) -> Bool {
+        if let textField = view as? UITextField, textField.isSecureTextEntry {
+            return true
+        }
+        return false
+    }
+
+    func isExplicitlySensitive(_ view: UIView) -> Bool {
         // Check manual sensitive marking
         if view.isSensitive {
             return true
@@ -679,7 +693,7 @@ public final class SessionReplayManager {
         return false
     }
 
-    private func isAutoMasked(_ view: UIView) -> Bool {
+    func isAutoMasked(_ view: UIView) -> Bool {
         // Auto-mask secure text fields (password fields)
         if config.autoMaskSecureTextFields {
             if let textField = view as? UITextField, textField.isSecureTextEntry {
