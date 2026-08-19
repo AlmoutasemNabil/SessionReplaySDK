@@ -516,6 +516,8 @@ SessionReplaySDK/
 
 ### Version 0.2.1
 - **Touch capture no longer swizzles `UIWindow.sendEvent(_:)`**: touches are now observed by a passive, never-recognizing gesture recognizer attached to each window. The swizzle placed the SDK on the call stack of every touch dispatch, so any `NSException` raised by UIKit or by app code during touch handling (e.g. the iOS 26 TextKit 2 crash in `-[UITextField _visualSelectionRangeForExtent:…]` when dragging a text-selection handle) was misattributed to `SessionReplayManager.sr_sendEvent` in crash reporters. The SDK no longer wraps UIKit's event pipeline at all.
+- **Nothing runs without an active session**: touch observers are attached in `startSession()` and removed in `stopSession()` (previously the swizzle was installed at `configure()` and stayed active whether or not a session was recording). Network response-body buffering is now skipped when no session is capturing. Frame capture, console capture and the crash-recovery timer were already session-scoped.
+- **Per-view opt-out from auto-masking**: `.unmaskedContent()` (SwiftUI) and `UIView.markAsUnmasked()` (UIKit) keep a text field visible in the replay while `autoMaskTextFields` stays on for everything else. Explicit `sensitiveContent()` / `markAsSensitive()` still wins.
 
 ### Version 0.2.0
 - **User Identification**: New `identifyUser()` and `setUserInfo()` APIs to attach user data to sessions

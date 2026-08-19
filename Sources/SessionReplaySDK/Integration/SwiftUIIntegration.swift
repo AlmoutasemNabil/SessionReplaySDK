@@ -401,6 +401,55 @@ public extension View {
     func sensitiveContent(maskColor: Color) -> some View {
         modifier(SensitiveContentModifier(maskColor: maskColor))
     }
+
+    /// Exempt this view from automatic masking (`autoMaskTextFields`,
+    /// `autoMaskSecureTextFields`, `autoMaskViewClasses`) so it stays visible in
+    /// the replay. Views marked with `sensitiveContent()` are still masked.
+    ///
+    ///     TextField("Upload URL", text: $url).unmaskedContent()
+    func unmaskedContent() -> some View {
+        modifier(UnmaskedContentModifier())
+    }
+}
+
+// MARK: - Unmasked Content Modifier
+
+/// View modifier that exempts a view from automatic masking
+public struct UnmaskedContentModifier: ViewModifier {
+    public init() {}
+
+    public func body(content: Content) -> some View {
+        content
+            .background(
+                UnmaskedMarkerView()
+            )
+    }
+}
+
+/// UIViewRepresentable that marks its hosting view as exempt from auto-masking.
+/// Like `SensitiveMarkerView`, it works by frame: anything auto-masked whose
+/// frame lies inside the marked view's frame is left visible.
+struct UnmaskedMarkerView: UIViewRepresentable {
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.backgroundColor = .clear
+        view.isUserInteractionEnabled = false
+        view.accessibilityIdentifier = "sr-unmasked"
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        DispatchQueue.main.async {
+            var current: UIView? = uiView.superview
+            while let view = current {
+                if view.bounds.size != .zero {
+                    view.markAsUnmasked()
+                    break
+                }
+                current = view.superview
+            }
+        }
+    }
 }
 
 // MARK: - Sensitive Content Modifier

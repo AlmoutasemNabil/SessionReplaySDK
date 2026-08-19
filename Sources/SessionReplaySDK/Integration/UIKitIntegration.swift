@@ -67,6 +67,23 @@ public extension UIView {
         return accessibilityIdentifier?.contains("sr-no-capture") ?? false
     }
 
+    /// Exempt this view (and anything auto-masked inside its frame) from
+    /// automatic masking (`autoMaskTextFields`, `autoMaskSecureTextFields`,
+    /// `autoMaskViewClasses`). Views explicitly marked with `markAsSensitive()`
+    /// or `sensitiveContent()` are still masked.
+    func markAsUnmasked() {
+        if accessibilityIdentifier == nil {
+            accessibilityIdentifier = "sr-unmasked"
+        } else if !accessibilityIdentifier!.contains("sr-unmasked") {
+            accessibilityIdentifier = accessibilityIdentifier! + " sr-unmasked"
+        }
+    }
+
+    /// Check if this view is exempt from automatic masking
+    var isUnmasked: Bool {
+        return accessibilityIdentifier?.contains("sr-unmasked") ?? false
+    }
+
     /// Capture a snapshot of this view
     func captureSnapshot(afterScreenUpdates: Bool = false) -> UIImage {
         let renderer = UIGraphicsImageRenderer(bounds: bounds)

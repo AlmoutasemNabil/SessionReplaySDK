@@ -71,6 +71,13 @@ public final class NetworkInterceptor {
         print("[SessionReplay] Network capture stopped")
     }
 
+    /// Whether a session is currently capturing network traffic. The URLSession
+    /// swizzles stay installed for the process lifetime once a session has run,
+    /// so every hook checks this before doing any work.
+    var isCapturing: Bool {
+        queue.sync { isActive }
+    }
+
     // MARK: - Request Tracking
 
     func shouldCaptureRequest(_ request: URLRequest?) -> Bool {
@@ -311,6 +318,9 @@ extension URLSessionTask {
 
     /// Append data to accumulated response (works for any task type)
     func sr_appendData(_ data: Data) {
+        // The completion-handler swizzles call this for every task once installed;
+        // don't buffer response bodies when no session is recording.
+        guard NetworkInterceptor.shared.isCapturing else { return }
         var accumulated = sr_accumulatedData ?? Data()
         accumulated.append(data)
         objc_setAssociatedObject(self, &accumulatedDataKey, accumulated, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)

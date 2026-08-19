@@ -61,8 +61,11 @@ public final class SessionReplayManager {
     // MARK: - Initialization
 
     private init() {
+        // Nothing but lifecycle notification observers is installed here.
+        // Touch capture, screen capture, log/network capture and timers are
+        // all started by startSession() and torn down by stopSession(), so an
+        // app that configures the SDK but never records pays for nothing.
         setupNotifications()
-        setupTouchCapture()
     }
 
     // MARK: - Configuration
@@ -171,6 +174,11 @@ public final class SessionReplayManager {
             startDisplayLink()
         }
 
+        // Observe touches only while a session is active
+        if config.captureTouches {
+            startTouchCapture()
+        }
+
         // Start crash recovery timer if enabled
         if config.enableCrashRecovery {
             startCrashRecoveryTimer()
@@ -198,6 +206,7 @@ public final class SessionReplayManager {
 
         isRecording = false
         stopDisplayLink()
+        stopTouchCapture()
         stopCrashRecoveryTimer()
 
         // Stop logging
@@ -263,6 +272,7 @@ public final class SessionReplayManager {
 
         isRecording = false
         stopDisplayLink()
+        stopTouchCapture()
         stopCrashRecoveryTimer()
 
         // Get current log data
@@ -604,26 +614,58 @@ public final class SessionReplayManager {
 
     /// Collect frames of all sensitive views that should be masked
     private func collectSensitiveViewFrames(in view: UIView) -> [CGRect] {
+        // Pass 1: frames explicitly exempted from auto-masking (markAsUnmasked / unmaskedContent)
+        var unmasked: [CGRect] = []
+        collectUnmaskedFramesRecursive(view, rootView: view, frames: &unmasked)
+
+        // Pass 2: frames to mask
         var frames: [CGRect] = []
-        collectSensitiveFramesRecursive(view, rootView: view, frames: &frames)
+        collectSensitiveFramesRecursive(view, rootView: view, unmasked: unmasked, frames: &frames)
         return frames
     }
 
-    private func collectSensitiveFramesRecursive(_ view: UIView, rootView: UIView, frames: inout [CGRect]) {
-        // Check if this view should be masked
-        if shouldMaskView(view) {
-            let frameInRoot = view.convert(view.bounds, to: rootView)
+    private func collectUnmaskedFramesRecursive(_ view: UIView, rootView: UIView, frames: inout [CGRect]) {
+        if view.isUnmasked {
+            frames.append(view.convert(view.bounds, to: rootView))
+        }
+        for subview in view.subviews {
+            collectUnmaskedFramesRecursive(subview, rootView: rootView, frames: &frames)
+        }
+    }
+
+    private func collectSensitiveFramesRecursive(_ view: UIView, rootView: UIView, unmasked: [CGRect], frames: inout [CGRect]) {
+        let frameInRoot = view.convert(view.bounds, to: rootView)
+
+        // Explicit marking always wins
+        if isExplicitlySensitive(view) {
             frames.append(frameInRoot)
             return // Don't check children of masked views
         }
 
+        // Auto-masking can be opted out of per view / per frame
+        if isAutoMasked(view) && !isCovered(frameInRoot, by: unmasked) {
+            frames.append(frameInRoot)
+            return
+        }
+
         // Recurse into subviews
         for subview in view.subviews {
-            collectSensitiveFramesRecursive(subview, rootView: rootView, frames: &frames)
+            collectSensitiveFramesRecursive(subview, rootView: rootView, unmasked: unmasked, frames: &frames)
         }
     }
 
-    private func shouldMaskView(_ view: UIView) -> Bool {
+    /// True when at least 90% of `frame` lies inside one of `regions`.
+    private func isCovered(_ frame: CGRect, by regions: [CGRect]) -> Bool {
+        guard !regions.isEmpty, frame.width > 0, frame.height > 0 else { return false }
+        let area = frame.width * frame.height
+        return regions.contains { region in
+            let inter = frame.intersection(region)
+            guard !inter.isNull else { return false }
+            return (inter.width * inter.height) / area >= 0.9
+        }
+    }
+
+    private func isExplicitlySensitive(_ view: UIView) -> Bool {
         // Check manual sensitive marking
         if view.isSensitive {
             return true
@@ -634,6 +676,10 @@ public final class SessionReplayManager {
             return true
         }
 
+        return false
+    }
+
+    private func isAutoMasked(_ view: UIView) -> Bool {
         // Auto-mask secure text fields (password fields)
         if config.autoMaskSecureTextFields {
             if let textField = view as? UITextField, textField.isSecureTextEntry {
@@ -809,49 +855,62 @@ public final class SessionReplayManager {
 
 // MARK: - Touch Capture
 
-private var touchCaptureInstalled = false
+/// Subscription that attaches observers to windows appearing mid-session.
+private var touchWindowSubscription: AnyCancellable?
+/// Windows we attached an observer to, so stopTouchCapture() can remove them
+/// even from windows that are no longer listed by any scene (e.g. keyboard windows).
+private let observedWindows = NSHashTable<UIWindow>.weakObjects()
 
 extension SessionReplayManager {
 
-    /// Installs passive touch observation on every visible `UIWindow`.
+    /// Starts passive touch observation on every visible `UIWindow`. Called by
+    /// `startSession()` only; `stopSession()` removes everything again, so an
+    /// app that is configured but not recording has no SDK code in its touch path.
     ///
-    /// Earlier versions swizzled `UIWindow.sendEvent(_:)`. That placed the SDK on the
-    /// call stack of *every* touch dispatch in the host app, so any `NSException`
-    /// raised by UIKit or by app code while handling a touch (for example the
-    /// iOS 26 TextKit 2 selection-handle crash in
+    /// Earlier versions swizzled `UIWindow.sendEvent(_:)` at configure time. That
+    /// placed the SDK on the call stack of *every* touch dispatch in the host app,
+    /// recording or not, so any `NSException` raised by UIKit or by app code while
+    /// handling a touch (for example the iOS 26 TextKit 2 selection-handle crash in
     /// `-[UITextField _visualSelectionRangeForExtent:forPoint:fromPosition:inDirection:]`)
     /// was attributed to `sr_sendEvent` in crash reports even though the SDK only
     /// forwarded the event. A `UIGestureRecognizer` that never recognizes sees the
-    /// same touches without wrapping UIKit's event dispatch, so the SDK no longer
-    /// appears in those stacks and cannot interfere with the event pipeline.
-    func setupTouchCapture() {
-        if Thread.isMainThread {
-            installTouchCapture()
-        } else {
-            DispatchQueue.main.async { [weak self] in
-                self?.installTouchCapture()
+    /// same touches without wrapping UIKit's event dispatch.
+    func startTouchCapture() {
+        onMain { [weak self] in
+            guard let self = self, touchWindowSubscription == nil else { return }
+
+            for window in self.currentApplicationWindows() {
+                self.attachTouchObserver(to: window)
             }
+
+            // Windows that appear later: alerts/toasts in custom windows, keyboard
+            // windows, additional scenes.
+            touchWindowSubscription = NotificationCenter.default
+                .publisher(for: UIWindow.didBecomeVisibleNotification)
+                .compactMap { $0.object as? UIWindow }
+                .sink { [weak self] window in
+                    self?.attachTouchObserver(to: window)
+                }
         }
     }
 
-    private func installTouchCapture() {
-        guard !touchCaptureInstalled else { return }
-        touchCaptureInstalled = true
+    /// Removes every observer installed by `startTouchCapture()`.
+    func stopTouchCapture() {
+        onMain {
+            touchWindowSubscription?.cancel()
+            touchWindowSubscription = nil
 
-        // Windows that already exist (SDK configured after makeKeyAndVisible)
-        for window in currentApplicationWindows() {
-            attachTouchObserver(to: window)
-        }
-
-        // Windows that appear later: alerts/toasts in custom windows, keyboard
-        // windows, additional scenes, or the main window when the SDK is
-        // configured before makeKeyAndVisible.
-        NotificationCenter.default.publisher(for: UIWindow.didBecomeVisibleNotification)
-            .compactMap { $0.object as? UIWindow }
-            .sink { [weak self] window in
-                self?.attachTouchObserver(to: window)
+            for window in observedWindows.allObjects {
+                window.gestureRecognizers?
+                    .filter { $0 is SessionReplayTouchObserver }
+                    .forEach { window.removeGestureRecognizer($0) }
             }
-            .store(in: &cancellables)
+            observedWindows.removeAllObjects()
+        }
+    }
+
+    private func onMain(_ block: @escaping () -> Void) {
+        if Thread.isMainThread { block() } else { DispatchQueue.main.async(execute: block) }
     }
 
     private func currentApplicationWindows() -> [UIWindow] {
@@ -864,6 +923,7 @@ extension SessionReplayManager {
         let alreadyAttached = window.gestureRecognizers?.contains { $0 is SessionReplayTouchObserver } ?? false
         guard !alreadyAttached else { return }
         window.addGestureRecognizer(SessionReplayTouchObserver())
+        observedWindows.add(window)
     }
 }
 
