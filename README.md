@@ -1,7 +1,7 @@
 # SessionReplaySDK
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-0.2.0-blue.svg" alt="Version 0.2.0"/>
+  <img src="https://img.shields.io/badge/Version-0.2.1-blue.svg" alt="Version 0.2.1"/>
   <img src="https://img.shields.io/badge/Platform-iOS%2015%2B-blue.svg" alt="Platform iOS 15+"/>
   <img src="https://img.shields.io/badge/Swift-5.9%2B-orange.svg" alt="Swift 5.9+"/>
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="MIT License"/>
@@ -513,6 +513,9 @@ SessionReplaySDK/
 ```
 
 ## Changelog
+
+### Version 0.2.1
+- **Touch capture no longer swizzles `UIWindow.sendEvent(_:)`**: touches are now observed by a passive, never-recognizing gesture recognizer attached to each window. The swizzle placed the SDK on the call stack of every touch dispatch, so any `NSException` raised by UIKit or by app code during touch handling (e.g. the iOS 26 TextKit 2 crash in `-[UITextField _visualSelectionRangeForExtent:…]` when dragging a text-selection handle) was misattributed to `SessionReplayManager.sr_sendEvent` in crash reporters. The SDK no longer wraps UIKit's event pipeline at all.
 
 ### Version 0.2.0
 - **User Identification**: New `identifyUser()` and `setUserInfo()` APIs to attach user data to sessions

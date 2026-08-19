@@ -62,7 +62,7 @@ public final class SessionReplayManager {
 
     private init() {
         setupNotifications()
-        setupSwizzling()
+        setupTouchCapture()
     }
 
     // MARK: - Configuration
@@ -807,38 +807,147 @@ public final class SessionReplayManager {
     }
 }
 
-// MARK: - Touch Swizzling
+// MARK: - Touch Capture
 
-private var swizzled = false
+private var touchCaptureInstalled = false
 
 extension SessionReplayManager {
 
-    func setupSwizzling() {
-        guard !swizzled else { return }
-        swizzled = true
-        let originalSelector = #selector(UIWindow.sendEvent(_:))
-        let swizzledSelector = #selector(UIWindow.sr_sendEvent(_:))
+    /// Installs passive touch observation on every visible `UIWindow`.
+    ///
+    /// Earlier versions swizzled `UIWindow.sendEvent(_:)`. That placed the SDK on the
+    /// call stack of *every* touch dispatch in the host app, so any `NSException`
+    /// raised by UIKit or by app code while handling a touch (for example the
+    /// iOS 26 TextKit 2 selection-handle crash in
+    /// `-[UITextField _visualSelectionRangeForExtent:forPoint:fromPosition:inDirection:]`)
+    /// was attributed to `sr_sendEvent` in crash reports even though the SDK only
+    /// forwarded the event. A `UIGestureRecognizer` that never recognizes sees the
+    /// same touches without wrapping UIKit's event dispatch, so the SDK no longer
+    /// appears in those stacks and cannot interfere with the event pipeline.
+    func setupTouchCapture() {
+        if Thread.isMainThread {
+            installTouchCapture()
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.installTouchCapture()
+            }
+        }
+    }
 
-        guard let originalMethod = class_getInstanceMethod(UIWindow.self, originalSelector),
-              let swizzledMethod = class_getInstanceMethod(UIWindow.self, swizzledSelector) else {
-            print("[SessionReplay] Failed to swizzle sendEvent")
-            return
+    private func installTouchCapture() {
+        guard !touchCaptureInstalled else { return }
+        touchCaptureInstalled = true
+
+        // Windows that already exist (SDK configured after makeKeyAndVisible)
+        for window in currentApplicationWindows() {
+            attachTouchObserver(to: window)
         }
 
-        method_exchangeImplementations(originalMethod, swizzledMethod)
-        print("[SessionReplay] Touch event swizzling enabled")
+        // Windows that appear later: alerts/toasts in custom windows, keyboard
+        // windows, additional scenes, or the main window when the SDK is
+        // configured before makeKeyAndVisible.
+        NotificationCenter.default.publisher(for: UIWindow.didBecomeVisibleNotification)
+            .compactMap { $0.object as? UIWindow }
+            .sink { [weak self] window in
+                self?.attachTouchObserver(to: window)
+            }
+            .store(in: &cancellables)
+    }
+
+    private func currentApplicationWindows() -> [UIWindow] {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+    }
+
+    private func attachTouchObserver(to window: UIWindow) {
+        let alreadyAttached = window.gestureRecognizers?.contains { $0 is SessionReplayTouchObserver } ?? false
+        guard !alreadyAttached else { return }
+        window.addGestureRecognizer(SessionReplayTouchObserver())
     }
 }
 
-extension UIWindow {
+/// A gesture recognizer that observes every touch delivered to its window but
+/// never recognizes, so it cannot cancel, delay, or block any other gesture or
+/// touch handling in the host app.
+final class SessionReplayTouchObserver: UIGestureRecognizer, UIGestureRecognizerDelegate {
 
-    @objc func sr_sendEvent(_ event: UIEvent) {
-        if let touches = event.allTouches {
-            for touch in touches {
-                SessionReplayManager.shared.recordTouchEvent(touch, in: self)
-            }
+    init() {
+        super.init(target: nil, action: nil)
+        cancelsTouchesInView = false
+        delaysTouchesBegan = false
+        delaysTouchesEnded = false
+        requiresExclusiveTouchType = false
+        allowedTouchTypes = [
+            UITouch.TouchType.direct,
+            .indirect,
+            .pencil,
+            .indirectPointer
+        ].map { NSNumber(value: $0.rawValue) }
+        delegate = self
+    }
+
+    // MARK: Touch observation
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesBegan(touches, with: event)
+        record(touches)
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesMoved(touches, with: event)
+        record(touches)
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesEnded(touches, with: event)
+        record(touches)
+        failIfSequenceFinished(event)
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesCancelled(touches, with: event)
+        record(touches)
+        failIfSequenceFinished(event)
+    }
+
+    private func record(_ touches: Set<UITouch>) {
+        guard let window = view as? UIWindow ?? view?.window else { return }
+        for touch in touches {
+            SessionReplayManager.shared.recordTouchEvent(touch, in: window)
         }
-        sr_sendEvent(event)
+    }
+
+    /// Only give up once every touch in this sequence has lifted. Failing while
+    /// other fingers are still down would stop UIKit delivering their moves to us.
+    private func failIfSequenceFinished(_ event: UIEvent) {
+        let stillActive = event.touches(for: self)?.contains {
+            $0.phase != .ended && $0.phase != .cancelled
+        } ?? false
+        if !stillActive && state == .possible {
+            state = .failed
+        }
+    }
+
+    // MARK: UIGestureRecognizerDelegate — never block anything
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        true
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        false
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldRequireFailureOf otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        false
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive press: UIPress) -> Bool {
+        false
     }
 }
 
