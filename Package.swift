@@ -21,6 +21,11 @@ let package = Package(
             name: "SessionReplaySDK",
             dependencies: [],
             path: "Sources/SessionReplaySDK"
+        ),
+        .testTarget(
+            name: "SessionReplaySDKTests",
+            dependencies: ["SessionReplaySDK"],
+            path: "Tests/SessionReplaySDKTests"
         )
     ]
 )

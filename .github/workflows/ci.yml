@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build & test (iOS)
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: xcodebuild -version
+
+      # The SDK is iOS-only in practice: nearly everything is behind
+      # `#if canImport(UIKit)`, so a macOS `swift build` would compile next to
+      # nothing. Everything below therefore targets iOS.
+      - name: Pick an available iOS simulator
+        id: sim
+        run: |
+          UDID=$(xcrun simctl list devices available -j \
+            | jq -r '.devices
+                     | to_entries
+                     | map(select(.key | test("iOS")))
+                     | map(.value[])
+                     | map(select(.name | test("iPhone")))
+                     | last
+                     | .udid')
+          if [ -z "$UDID" ] || [ "$UDID" = "null" ]; then
+            echo "::error::No iOS simulator available on this runner"
+            xcrun simctl list devices available
+            exit 1
+          fi
+          echo "Using simulator $UDID"
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+
+      - name: Test on simulator
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -scheme SessionReplaySDK \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -derivedDataPath .build/dd \
+            -resultBundlePath TestResults.xcresult
+
+      # Consumers (e.g. the Cashier app) build this package for real devices,
+      # so verify it compiles for the device architecture too.
+      - name: Build for iOS device architecture
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -scheme SessionReplaySDK \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath .build/dd-device \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TestResults
+          path: TestResults.xcresult

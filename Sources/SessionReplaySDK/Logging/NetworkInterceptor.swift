@@ -227,12 +227,17 @@ public final class NetworkInterceptor {
 
     // MARK: - Helpers
 
-    private func processHeaders(_ headers: [String: String]?, config: SessionLoggerConfig) -> [String: String]? {
+    func processHeaders(_ headers: [String: String]?, config: SessionLoggerConfig) -> [String: String]? {
         guard let headers = headers else { return nil }
+
+        // `redactedHeaders` is documented as case-insensitive, so normalise both
+        // sides: a config of ["Authorization"] must redact an "authorization"
+        // header and vice versa.
+        let redacted = Set(config.redactedHeaders.map { $0.lowercased() })
 
         var processed: [String: String] = [:]
         for (key, value) in headers {
-            if config.redactedHeaders.contains(key.lowercased()) {
+            if redacted.contains(key.lowercased()) {
                 processed[key] = "[REDACTED]"
             } else {
                 processed[key] = value
@@ -241,7 +246,7 @@ public final class NetworkInterceptor {
         return processed
     }
 
-    private func processBody(_ data: Data?, config: SessionLoggerConfig) -> (content: String, size: Int)? {
+    func processBody(_ data: Data?, config: SessionLoggerConfig) -> (content: String, size: Int)? {
         guard let data = data else { return nil }
 
         let size = data.count
@@ -552,3 +557,12 @@ final class URLSessionSwizzler {
         method_setImplementation(originalMethod, swizzledIMP)
     }
 }
+
+// Note: Proxy delegate approach was removed in favor of:
+// 1. URLSessionTask.resume swizzling (captures all task starts)
+// 2. Completion handler wrapping (captures response data for completion-based tasks)
+// 3. KVO on task.state (captures completion for delegate-based tasks)
+//
+// This approach works with ALL networking libraries (Alamofire, FNetwork, etc.)
+// regardless of their SSL pinning configuration, because we intercept at the
+// URLSessionTask level which is common to all URLSession-based networking.
