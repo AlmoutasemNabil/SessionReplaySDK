@@ -325,9 +325,9 @@ public final class SessionUploader {
         request.httpMethod = "POST"
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
-        // Add authentication
+        // Add authentication via X-API-Key header
         if let apiKey = config.apiKey {
-            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+            request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
         }
 
         // Add custom headers
@@ -338,10 +338,93 @@ public final class SessionUploader {
         // Build multipart body
         var body = Data()
 
-        // Add session ID
-        body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"sessionId\"\r\n\r\n".data(using: .utf8)!)
-        body.append("\(sessionId)\r\n".data(using: .utf8)!)
+        // Helper to add form field
+        func addFormField(_ name: String, _ value: String) {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".data(using: .utf8)!)
+            body.append("\(value)\r\n".data(using: .utf8)!)
+        }
+
+        // Parse JSON metadata to extract required fields
+        if let jsonData = try? Data(contentsOf: jsonURL),
+           let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
+
+            // Get metadata object (contains device/app info)
+            let metadata = json["metadata"] as? [String: Any] ?? [:]
+
+            // Get app name from bundle ID or metadata
+            let bundleId = Bundle.main.bundleIdentifier ?? "unknown.bundle"
+            let appName = Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
+                ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String
+                ?? bundleId
+
+            // Required fields
+            addFormField("app_name", appName)
+            addFormField("app_version", metadata["appVersion"] as? String ?? "1.0.0")
+            addFormField("bundle_id", bundleId)
+            addFormField("device_model", metadata["deviceModel"] as? String ?? "Unknown")
+            addFormField("os_version", metadata["osVersion"] as? String ?? "Unknown")
+            addFormField("device_id", metadata["deviceId"] as? String ?? UUID().uuidString)
+
+            // Duration in seconds
+            if let durationMs = json["durationMs"] as? Double {
+                addFormField("duration_seconds", String(durationMs / 1000.0))
+            }
+
+            // User identifier from userInfo
+            if let userInfo = json["userInfo"] as? [String: String],
+               let userId = userInfo["userId"] ?? userInfo["id"] ?? userInfo["email"] {
+                addFormField("user_identifier", userId)
+            }
+
+            // Logs as JSON array string (convert to backend format)
+            if let logs = json["logs"] as? [[String: Any]] {
+                // Transform to backend expected format
+                let transformedLogs: [[String: Any]] = logs.map { log in
+                    var entry: [String: Any] = [:]
+                    if let absoluteTime = log["absoluteTime"] as? String {
+                        entry["timestamp"] = absoluteTime
+                    }
+                    entry["level"] = (log["level"] as? String) ?? "info"
+                    entry["message"] = (log["message"] as? String) ?? ""
+                    entry["file"] = log["source"]
+                    return entry
+                }
+                if let logsData = try? JSONSerialization.data(withJSONObject: transformedLogs),
+                   let logsString = String(data: logsData, encoding: .utf8) {
+                    addFormField("logs", logsString)
+                }
+            }
+
+            // Network requests as JSON array string (convert to backend format)
+            if let network = json["networkRequests"] as? [[String: Any]] {
+                // Transform to backend expected format
+                let transformedNetwork: [[String: Any]] = network.map { req in
+                    var entry: [String: Any] = [:]
+                    if let absoluteTime = req["absoluteTime"] as? String {
+                        entry["timestamp"] = absoluteTime
+                    }
+                    entry["method"] = (req["method"] as? String) ?? "GET"
+                    entry["url"] = (req["url"] as? String) ?? ""
+                    entry["status_code"] = req["statusCode"]
+                    if let duration = req["duration"] as? Double {
+                        entry["duration_ms"] = Int(duration * 1000)
+                    }
+                    entry["request_size"] = req["requestBodySize"]
+                    entry["response_size"] = req["responseBodySize"]
+                    return entry
+                }
+                if let networkData = try? JSONSerialization.data(withJSONObject: transformedNetwork),
+                   let networkString = String(data: networkData, encoding: .utf8) {
+                    addFormField("network_requests", networkString)
+                }
+            }
+
+            // Full metadata as JSON string (optional extra data)
+            if let metadataString = String(data: jsonData, encoding: .utf8) {
+                addFormField("metadata", metadataString)
+            }
+        }
 
         // Add video file
         if let videoData = try? Data(contentsOf: videoURL) {
@@ -349,15 +432,6 @@ public final class SessionUploader {
             body.append("Content-Disposition: form-data; name=\"video\"; filename=\"\(videoURL.lastPathComponent)\"\r\n".data(using: .utf8)!)
             body.append("Content-Type: video/mp4\r\n\r\n".data(using: .utf8)!)
             body.append(videoData)
-            body.append("\r\n".data(using: .utf8)!)
-        }
-
-        // Add JSON metadata
-        if let jsonData = try? Data(contentsOf: jsonURL) {
-            body.append("--\(boundary)\r\n".data(using: .utf8)!)
-            body.append("Content-Disposition: form-data; name=\"metadata\"; filename=\"\(jsonURL.lastPathComponent)\"\r\n".data(using: .utf8)!)
-            body.append("Content-Type: application/json\r\n\r\n".data(using: .utf8)!)
-            body.append(jsonData)
             body.append("\r\n".data(using: .utf8)!)
         }
 

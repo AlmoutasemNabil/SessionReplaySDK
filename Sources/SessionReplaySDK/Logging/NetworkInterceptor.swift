@@ -557,3 +557,12 @@ final class URLSessionSwizzler {
         method_setImplementation(originalMethod, swizzledIMP)
     }
 }
+
+// Note: Proxy delegate approach was removed in favor of:
+// 1. URLSessionTask.resume swizzling (captures all task starts)
+// 2. Completion handler wrapping (captures response data for completion-based tasks)
+// 3. KVO on task.state (captures completion for delegate-based tasks)
+//
+// This approach works with ALL networking libraries (Alamofire, FNetwork, etc.)
+// regardless of their SSL pinning configuration, because we intercept at the
+// URLSessionTask level which is common to all URLSession-based networking.
