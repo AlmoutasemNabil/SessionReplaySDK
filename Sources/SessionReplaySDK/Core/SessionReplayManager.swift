@@ -212,33 +212,44 @@ public final class SessionReplayManager {
         // Stop logging
         let logData = SessionLogger.shared.stopCapture()
 
+        // Take ownership of the session being stopped before any async work.
+        //
+        // `isRecording` is already false, so the host app is free to call
+        // startSession() again immediately — and video finalization below is
+        // asynchronous. If the completion re-read `self.currentSession` it
+        // would write THIS session's logs under the NEXT session's identity,
+        // losing this session entirely and corrupting the next one. Bind the
+        // values now so the completion can only ever save what it stopped.
+        var finishing = currentSession
+        let finishingWriter = videoWriter
+        currentSession = nil
+        videoWriter = nil
+
+        finishing?.endTime = Date()
+
         // If video recording is enabled, finish video then save
         if config.enableVideoRecording {
-            videoWriter?.finishWriting { [weak self] in
+            finishingWriter?.finishWriting { [weak self] in
                 guard let self = self else {
                     DispatchQueue.main.async { completion?() }
                     return
                 }
 
-                self.currentSession?.endTime = Date()
-
-                if let session = self.currentSession {
+                if let session = finishing {
                     self.saveSessionMetadata(session, logData: logData)
                     self.cleanupCrashRecoveryFile(sessionId: session.sessionId)
                 }
 
                 if self.config.debugLogging {
-                    print("[SessionReplay] Session stopped. Frames captured: \(self.currentSession?.frameCount ?? 0)")
-                    print("[SessionReplay] Touch events: \(self.currentSession?.touchEvents?.count ?? 0)")
+                    print("[SessionReplay] Session stopped. Frames captured: \(finishing?.frameCount ?? 0)")
+                    print("[SessionReplay] Touch events: \(finishing?.touchEvents?.count ?? 0)")
                 }
 
                 DispatchQueue.main.async { completion?() }
             }
         } else {
             // Logs-only mode - save immediately
-            currentSession?.endTime = Date()
-
-            if let session = currentSession {
+            if let session = finishing {
                 saveSessionMetadata(session, logData: logData)
                 cleanupCrashRecoveryFile(sessionId: session.sessionId)
             }
@@ -367,7 +378,15 @@ public final class SessionReplayManager {
                     return nil
                 }
             }
+            .filter { !isActiveSession($0.sessionId) }
             .sorted { $0.startTime > $1.startTime }
+    }
+
+    /// True while `sessionId` is the session currently being recorded. Such a
+    /// session is not finished, not saved, and must not be listed for upload
+    /// or deleted — its video file is still open.
+    func isActiveSession(_ sessionId: String) -> Bool {
+        isRecording && sessionId == currentSession?.sessionId
     }
 
     /// Get video URL for a session
@@ -383,6 +402,15 @@ public final class SessionReplayManager {
 
     /// Delete a session
     public func deleteSession(_ session: SessionReplayData) {
+        // Never touch files belonging to a session that is still recording.
+        // Its video file is open: unlinking it leaves the writer appending to
+        // an inode with no directory entry, so the recording is silently lost
+        // and the session finishes with frames captured but no video on disk.
+        guard !isActiveSession(session.sessionId) else {
+            print("[SessionReplay] Refusing to delete the session currently being recorded: \(session.sessionId)")
+            return
+        }
+
         let fileManager = FileManager.default
 
         for segment in session.videoSegments {
