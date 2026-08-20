@@ -187,6 +187,27 @@ public final class SessionReplayManager {
         print("[SessionReplay] Session started: \(currentSession?.sessionId ?? "unknown")")
     }
 
+    /// Asks UIKit for extra execution time so an in-flight session save can
+    /// finish after the app leaves the foreground. Returns `.invalid` when no
+    /// assertion could be taken, which callers can pass to
+    /// `endFinalizationTask(_:)` safely.
+    private func beginFinalizationTask() -> UIBackgroundTaskIdentifier {
+        guard Thread.isMainThread else { return .invalid }
+        var identifier: UIBackgroundTaskIdentifier = .invalid
+        identifier = UIApplication.shared.beginBackgroundTask(withName: "com.sessionreplay.finalize") {
+            // Expiry: UIKit is about to suspend us regardless.
+            Self.endFinalizationTask(identifier)
+        }
+        return identifier
+    }
+
+    private static func endFinalizationTask(_ identifier: UIBackgroundTaskIdentifier) {
+        guard identifier != .invalid else { return }
+        DispatchQueue.main.async {
+            UIApplication.shared.endBackgroundTask(identifier)
+        }
+    }
+
     /// Stop the current recording session
     public func stopSession() {
         stopSession(completion: nil)
@@ -229,10 +250,22 @@ public final class SessionReplayManager {
 
         // If video recording is enabled, finish video then save
         if config.enableVideoRecording {
-            finishingWriter?.finishWriting { [weak self] in
+            // Finalizing the movie is asynchronous, and the most common reason
+            // to stop is the app moving to the background — where iOS may
+            // suspend the process mid-write, leaving an mp4 with no moov atom
+            // that no player can open. Hold a background task until the file
+            // is closed and the metadata is on disk.
+            let backgroundTask = beginFinalizationTask()
+
+            finishingWriter?.finishWriting { [weak self] videoDidFinalize in
                 guard let self = self else {
+                    Self.endFinalizationTask(backgroundTask)
                     DispatchQueue.main.async { completion?() }
                     return
+                }
+
+                if !videoDidFinalize {
+                    print("[SessionReplay] Video for session \(finishing?.sessionId ?? "unknown") could not be finalized and will not be playable")
                 }
 
                 if let session = finishing {
@@ -245,6 +278,7 @@ public final class SessionReplayManager {
                     print("[SessionReplay] Touch events: \(finishing?.touchEvents?.count ?? 0)")
                 }
 
+                Self.endFinalizationTask(backgroundTask)
                 DispatchQueue.main.async { completion?() }
             }
         } else {
