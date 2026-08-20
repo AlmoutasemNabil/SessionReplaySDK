@@ -54,26 +54,57 @@ public final class VideoWriter {
         }
     }
 
-    public func finishWriting(completion: @escaping () -> Void) {
-        writingQueue.async { [weak self] in
-            guard let self = self, self.isWriting else {
-                DispatchQueue.main.async { completion() }
+    /// Finalizes the movie. `completion` receives `true` only when the file is
+    /// actually playable.
+    ///
+    /// An `AVAssetWriter` writes its `moov` atom during `finishWriting()`. If
+    /// that call is interrupted — most commonly because the app was suspended
+    /// right after moving to the background — the writer ends in `.failed` and
+    /// leaves `ftyp/wide/mdat` on disk with no index: a non-empty file that no
+    /// player can open. It still invokes its completion handler, so success
+    /// must be read from `status`, never assumed.
+    public func finishWriting(completion: @escaping (Bool) -> Void) {
+        // Deliberately captures `self` strongly. Callers release their
+        // reference to the writer as soon as they stop a session, so that late
+        // frames can't be appended to it. With a weak capture the writer would
+        // deallocate before this block ran, AVAssetWriter.finishWriting() would
+        // never be called, and the movie would be left as ftyp/wide/mdat with
+        // no moov atom: a file with real bytes that no player can open.
+        writingQueue.async {
+            guard self.isWriting else {
+                DispatchQueue.main.async { completion(false) }
                 return
             }
+
+            // Close the input to further frames *here*, on the same serial
+            // queue that writeFrame() runs on. Otherwise a frame already in
+            // flight from the capture queue can be appended after
+            // markAsFinished(), which puts the writer into .failed and loses
+            // the moov atom — a non-empty file that will not play.
+            self.isWriting = false
 
             self.videoInput?.markAsFinished()
 
             self.assetWriter?.finishWriting {
-                self.isWriting = false
-                print("[VideoWriter] Finished writing: \(self.outputURL.lastPathComponent)")
-                print("[VideoWriter] Total frames: \(self.frameCount)")
 
-                if let attributes = try? FileManager.default.attributesOfItem(atPath: self.outputURL.path),
-                   let fileSize = attributes[.size] as? Int64 {
-                    print("[VideoWriter] File size: \(fileSize / 1024)KB")
+                let status = self.assetWriter?.status ?? .unknown
+                let succeeded = (status == .completed)
+
+                if succeeded {
+                    print("[VideoWriter] Finished writing: \(self.outputURL.lastPathComponent)")
+                    print("[VideoWriter] Total frames: \(self.frameCount)")
+
+                    if let attributes = try? FileManager.default.attributesOfItem(atPath: self.outputURL.path),
+                       let fileSize = attributes[.size] as? Int64 {
+                        print("[VideoWriter] File size: \(fileSize / 1024)KB")
+                    }
+                } else {
+                    let error = self.assetWriter?.error
+                    print("[VideoWriter] FAILED to finalize \(self.outputURL.lastPathComponent) — status: \(status.rawValue), error: \(error.map(String.init(describing:)) ?? "none")")
+                    print("[VideoWriter] The file has no moov atom and is not playable (frames written: \(self.frameCount))")
                 }
 
-                DispatchQueue.main.async { completion() }
+                DispatchQueue.main.async { completion(succeeded) }
             }
         }
     }
@@ -83,16 +114,20 @@ public final class VideoWriter {
         writingQueue.sync { [weak self] in
             guard let self = self, self.isWriting else { return }
 
+            self.isWriting = false
             self.videoInput?.markAsFinished()
 
             let semaphore = DispatchSemaphore(value: 0)
             self.assetWriter?.finishWriting {
-                self.isWriting = false
                 semaphore.signal()
             }
 
             // Wait with timeout to avoid blocking forever
             _ = semaphore.wait(timeout: .now() + 2.0)
+
+            if self.assetWriter?.status != .completed {
+                print("[VideoWriter] FAILED to finalize \(self.outputURL.lastPathComponent) during emergency stop — not playable")
+            }
         }
     }
 
@@ -156,6 +191,8 @@ public final class VideoWriter {
 
     private func writeFrame(_ image: UIImage) {
         guard isWriting,
+              let assetWriter = assetWriter,
+              assetWriter.status == .writing,
               let videoInput = videoInput,
               let pixelBufferAdaptor = pixelBufferAdaptor,
               videoInput.isReadyForMoreMediaData else {
@@ -175,7 +212,7 @@ public final class VideoWriter {
             frameCount += 1
             lastFrameTime = presentationTime
         } else {
-            print("[VideoWriter] Failed to append frame: \(assetWriter?.error?.localizedDescription ?? "unknown")")
+            print("[VideoWriter] Failed to append frame: \(assetWriter.error?.localizedDescription ?? "unknown")")
         }
     }
 
