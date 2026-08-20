@@ -1,9 +1,9 @@
-# SessionReplaySDK
+# SessionReplaySDK — iOS Session Recording SDK
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-0.2.2-blue.svg" alt="Version 0.2.2"/>
-  <img src="https://img.shields.io/badge/Platform-iOS%2015%2B-blue.svg" alt="Platform iOS 15+"/>
-  <img src="https://img.shields.io/badge/Swift-5.9%2B-orange.svg" alt="Swift 5.9+"/>
+  <a href="https://swiftpackageindex.com/AlmoutasemNabil/SessionReplaySDK"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2FAlmoutasemNabil%2FSessionReplaySDK%2Fbadge%3Ftype%3Dswift-versions" alt="Swift versions"/></a>
+  <a href="https://swiftpackageindex.com/AlmoutasemNabil/SessionReplaySDK"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2FAlmoutasemNabil%2FSessionReplaySDK%2Fbadge%3Ftype%3Dplatforms" alt="Platforms"/></a>
+  <img src="https://img.shields.io/badge/Version-1.0.0-blue.svg" alt="Version 1.0.0"/>
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="MIT License"/>
   <img src="https://img.shields.io/badge/SPM-Compatible-brightgreen.svg" alt="SPM Compatible"/>
 </p>
